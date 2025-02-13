@@ -33,8 +33,8 @@ def carregar_shapefile(caminho, calcular_percentuais=True):
     gdf = gdf.to_crs("EPSG:4326")
     return gdf
 
-gdf_cnuc = carregar_shapefile("cnuc.shp")
-gdf_sigef = carregar_shapefile("sigef.shp", calcular_percentuais=False)
+gdf_cnuc = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\cnu\cnuc.shp")
+gdf_sigef = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\cnu\sigef.shp", calcular_percentuais=False)
 gdf_cnuc["base"] = "cnuc"
 gdf_sigef["base"] = "sigef"
 limites = gdf_cnuc.total_bounds
@@ -48,7 +48,7 @@ def load_csv(caminho):
     df["total_ocorrencias"] = df[colunas_ocorrencias].sum(axis=1)
     return df
 
-df_csv = load_csv("CPT-PA-count.csv")
+df_csv = load_csv(r"C:\Users\joelc\Documents\Estágio\cnu\CPT-PA-count.csv")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
@@ -92,8 +92,7 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
             marker_opacity=0.5,
             marker_line_width=1,
-            showlegend=False,
-            showscale=False
+            showlegend=False
         )
         fig.add_trace(trace_sigef)
     cidades = df_csv["Município"].unique()
@@ -189,6 +188,17 @@ bar_fig = px.bar(
 )
 bar_fig.update_layout(legend_title_text='Métricas')
 
+contagens_fig = px.bar(
+    gdf_cnuc,
+    x='nome_uc',
+    y=['c_alertas', 'c_sigef'],
+    labels={'value': "Contagens", "nome_uc": "Nome UC"},
+    color_discrete_map={"c_alertas": 'rgb(251,180,174)',
+                          "c_sigef": 'rgb(179,205,227)'},
+    template="simple_white"
+)
+contagens_fig.update_layout(legend_title_text='Contagens de Alertas e SIGEF')
+
 pie_fig = px.pie(
     df_csv,
     values='Áreas de conflitos',
@@ -216,4 +226,5 @@ with col1:
     st.markdown(cards_html, unsafe_allow_html=True)
 with col2:
     st.plotly_chart(bar_fig, use_container_width=True)
+    st.plotly_chart(contagens_fig, use_container_width=True)
     st.plotly_chart(pie_fig, use_container_width=True)
