@@ -33,8 +33,8 @@ def carregar_shapefile(caminho, calcular_percentuais=True):
     gdf = gdf.to_crs("EPSG:4326")
     return gdf
 
-gdf_cnuc = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\cnu\cnuc.shp")
-gdf_sigef = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\cnu\sigef.shp", calcular_percentuais=False)
+gdf_cnuc = carregar_shapefile("cnuc.shp")
+gdf_sigef = carregar_shapefile("sigef.shp", calcular_percentuais=False)
 gdf_cnuc["base"] = "cnuc"
 gdf_sigef["base"] = "sigef"
 limites = gdf_cnuc.total_bounds
@@ -48,7 +48,7 @@ def load_csv(caminho):
     df["total_ocorrencias"] = df[colunas_ocorrencias].sum(axis=1)
     return df
 
-df_csv = load_csv(r"C:\Users\joelc\Documents\Estágio\cnu\CPT-PA-count.csv")
+df_csv = load_csv("CPT-PA-count.csv")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
