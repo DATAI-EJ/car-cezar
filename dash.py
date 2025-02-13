@@ -212,7 +212,7 @@ pie_fig = px.pie(
 pie_fig.update_traces(textposition='inside', textinfo='percent+label')
 pie_fig.update_layout(font_size=14)
 
-st.title("CNU")
+st.title("Cadastro Nacional de Unidades de Conservação (CNUC)")
 invadindo_options = ["Selecione"] + sorted(gdf_sigef["invadindo"].str.strip().unique().tolist())
 invadindo_opcao = st.sidebar.selectbox("Selecione a área (invadindo)", invadindo_options)
 if invadindo_opcao == "Selecione":
