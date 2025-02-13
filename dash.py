@@ -92,7 +92,8 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
             marker_opacity=0.5,
             marker_line_width=1,
-            showlegend=False
+            showlegend=False,
+            showscale=False
         )
         fig.add_trace(trace_sigef)
     cidades = df_csv["Município"].unique()
