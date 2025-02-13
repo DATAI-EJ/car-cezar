@@ -181,7 +181,7 @@ bar_fig = px.bar(
     gdf_cnuc,
     x='nome_uc',
     y=['alerta_km2', 'sigef_km2', 'area_km2'],
-    labels={'value': "Contagens", "nome_uc": "Nome UC"},
+    labels={'value': "Área (Km²)", "nome_uc": "Nome UC"},
     color_discrete_map={"alerta_km2": 'rgb(251,180,174)',
                           "sigef_km2": 'rgb(179,205,227)',
                           "area_km2": 'rgb(204,235,197)'},
