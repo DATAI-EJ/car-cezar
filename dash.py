@@ -144,7 +144,9 @@ def criar_cards(ids_selecionados):
     perc_total_alerta = (total_alerta / total_area) * 100 if total_area != 0 else 0
     perc_total_sigef = (total_sigef / total_area) * 100 if total_area != 0 else 0
     total_unidades = filtro.shape[0]
-    return perc_total_alerta, perc_total_sigef, int(total_unidades), round(total_alerta), round(total_sigef)
+    total_c_alertas = filtro["c_alertas"].sum()
+    total_c_sigef = filtro["c_sigef"].sum()
+    return perc_total_alerta, perc_total_sigef, int(total_unidades), int(total_c_alertas), int(total_c_sigef)
 
 def render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef):
     card_style = ("background-color: #0074D9; padding: 5px; border-radius: 5px; "
