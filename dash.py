@@ -138,14 +138,13 @@ def criar_figura(ids_selecionados, invadindo_opcao):
 
 def criar_cards(ids_selecionados):
     filtro = gdf_cnuc[gdf_cnuc["id"].isin(ids_selecionados)] if ids_selecionados else gdf_cnuc
+    soma_perc_alerta = filtro["perc_alerta"].sum()
+    soma_perc_sigef = filtro["perc_sigef"].sum()
+    total_unidades = filtro.shape[0]
     total_alerta = filtro["c_alertas"].sum()
     total_sigef = filtro["c_sigef"].sum()
-    total_area = filtro["area_km2"].sum()
-    perc_alerta = (total_alerta / total_area * 100) if total_area else 0
-    perc_sigef = (total_sigef / total_area * 100) if total_area else 0
-    total_unidades = filtro.shape[0]
-    return perc_alerta, perc_sigef, total_unidades, total_alerta, total_sigef
-
+    return soma_perc_alerta, soma_perc_sigef, total_unidades, total_alerta, total_sigef
+    
 def render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef):
     card_style = ("background-color: #0074D9; padding: 5px; border-radius: 5px; "
                   "text-align: center; width: 120px; height: 120px; margin: 5px; "
