@@ -37,6 +37,7 @@ gdf_cnuc = carregar_shapefile(r"cnuc.shp")
 gdf_sigef = carregar_shapefile(r"sigef.shp", calcular_percentuais=False)
 gdf_cnuc["base"] = "cnuc"
 gdf_sigef["base"] = "sigef"
+gdf_sigef = gdf_sigef.rename(columns={"id": "id_sigef"})
 limites = gdf_cnuc.total_bounds
 centro = {"lat": (limites[1] + limites[3]) / 2, "lon": (limites[0] + limites[2]) / 2}
 
@@ -87,7 +88,7 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             gdf_sigef_filtrado = gdf_sigef[gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.strip().lower()]
         trace_sigef = go.Choroplethmapbox(
             geojson=gdf_sigef_filtrado.__geo_interface__,
-            locations=gdf_sigef_filtrado["id"],
+            locations=gdf_sigef_filtrado["id_sigef"],
             z=[1] * len(gdf_sigef_filtrado),
             colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
             marker_opacity=0.5,
@@ -131,9 +132,7 @@ def criar_figura(ids_selecionados, invadindo_opcao):
         )
         fig.add_trace(trace_cpt_outline)
         fig.add_trace(trace_cpt)
-    fig.update_layout(legend=dict(title="Legenda", x=0, y=1), height=700,
-                      margin={"r": 10, "t": 50, "l": 10, "b": 10},
-                      title_font=dict(size=22))
+    fig.update_layout(legend=dict(title="Legenda", x=0, y=1), height=700, margin={"r": 10, "t": 50, "l": 10, "b": 10}, title_font=dict(size=22))
     return fig
 
 def criar_cards(ids_selecionados):
@@ -149,10 +148,7 @@ def criar_cards(ids_selecionados):
     return perc_total_alerta, perc_total_sigef, int(total_unidades), int(total_c_alertas), int(total_c_sigef)
 
 def render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef):
-    card_style = ("background-color: #0074D9; padding: 5px; border-radius: 5px; "
-                  "text-align: center; width: 120px; height: 120px; margin: 5px; "
-                  "display: flex; flex-direction: column; justify-content: center; "
-                  "align-items: center; box-sizing: border-box; overflow: hidden; font-size: 14px;")
+    card_style = ("background-color: #0074D9; padding: 5px; border-radius: 5px; text-align: center; width: 120px; height: 120px; margin: 5px; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; overflow: hidden; font-size: 14px;")
     html = f"""
     <div style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 20px;">
         <div style="{card_style}">
@@ -184,9 +180,7 @@ bar_fig = px.bar(
     x='nome_uc',
     y=['alerta_km2', 'sigef_km2', 'area_km2'],
     labels={'value': "Área (Km²)", "nome_uc": "Nome UC"},
-    color_discrete_map={"alerta_km2": 'rgb(251,180,174)',
-                          "sigef_km2": 'rgb(179,205,227)',
-                          "area_km2": 'rgb(204,235,197)'},
+    color_discrete_map={"alerta_km2": 'rgb(251,180,174)', "sigef_km2": 'rgb(179,205,227)', "area_km2": 'rgb(204,235,197)'},
     template="simple_white"
 )
 bar_fig.update_layout(legend_title_text='Métricas')
@@ -196,8 +190,7 @@ contagens_fig = px.bar(
     x='nome_uc',
     y=['c_alertas', 'c_sigef'],
     labels={'value': "Contagens", "nome_uc": "Nome UC"},
-    color_discrete_map={"c_alertas": 'rgb(251,180,174)',
-                          "c_sigef": 'rgb(179,205,227)'},
+    color_discrete_map={"c_alertas": 'rgb(251,180,174)', "c_sigef": 'rgb(179,205,227)'},
     template="simple_white"
 )
 contagens_fig.update_layout(legend_title_text='Contagens de Alertas e SIGEF')
@@ -215,11 +208,16 @@ pie_fig.update_traces(textposition='inside', textinfo='percent+label')
 pie_fig.update_layout(font_size=14)
 
 st.title("Cadastro Nacional de Unidades de Conservação (CNUC)")
-invadindo_options = ["Selecione"] + sorted(gdf_sigef["invadindo"].str.strip().unique().tolist())
-invadindo_opcao = st.sidebar.selectbox("Selecione a área (invadindo)", invadindo_options)
+opcoes_invadindo = ["Selecione", "Todos"] + sorted(gdf_sigef["invadindo"].str.strip().unique().tolist())
+invadindo_opcao = st.sidebar.selectbox("Selecione a área (invadindo)", opcoes_invadindo)
 if invadindo_opcao == "Selecione":
     invadindo_opcao = None
-ids_selecionados = []
+if invadindo_opcao is None or invadindo_opcao.lower() == "todos":
+    ids_selecionados = []
+else:
+    gdf_sigef_filtrado = gdf_sigef[gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.strip().lower()]
+    gdf_cnuc_filtrado = gpd.sjoin(gdf_cnuc, gdf_sigef_filtrado, how="inner", predicate="intersects")
+    ids_selecionados = gdf_cnuc_filtrado["id"].unique().tolist()
 fig = criar_figura(ids_selecionados, invadindo_opcao)
 perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(ids_selecionados)
 col1, col2 = st.columns([6, 4])
