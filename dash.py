@@ -37,8 +37,8 @@ def carregar_shapefile(caminho, calcular_percentuais=True):
     gdf = gdf.to_crs("EPSG:4326")
     return gdf
 
-gdf_cnuc = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\entrega-PA\entrega-PA\áreas-selecionadas\cnuc\cnuc.shp")
-gdf_sigef = carregar_shapefile(r"C:\Users\joelc\Documents\Estágio\entrega-PA\entrega-PA\áreas-selecionadas\sigef\sigef.shp", calcular_percentuais=False)
+gdf_cnuc = carregar_shapefile(r"cnuc.shp")
+gdf_sigef = carregar_shapefile(r"sigef.shp", calcular_percentuais=False)
 gdf_cnuc["base"] = "cnuc"
 gdf_sigef["base"] = "sigef"
 gdf_sigef = gdf_sigef.rename(columns={"id": "id_sigef"})
@@ -53,7 +53,7 @@ def load_csv(caminho):
     df["total_ocorrencias"] = df[colunas_ocorrencias].sum(axis=1)
     return df
 
-df_csv = load_csv(r"C:\Users\joelc\Documents\Estágio\cnu\CPT-PA-count.csv")
+df_csv = load_csv(r"CPT-PA-count.csv")
 
 @st.cache_data
 def carregar_dados_cpt(arquivo_excel):
@@ -471,7 +471,7 @@ with col2:
 #     st.header("Indicadores Sociais")
 #     
 #     try:
-#         df_cpt = "C:/Users/joelc/Documents/Estágio/entrega-PA/entrega-PA/áreas-selecionadas/CPTF-PA.xlsx"
+#         df_cpt = "CPTF-PA.xlsx"
 # 
 #         if not df_cpt.empty:
 #             figuras = criar_graficos_cpt(df_cpt)
