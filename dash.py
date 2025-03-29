@@ -56,62 +56,18 @@ def load_csv(caminho):
 df_csv = load_csv(r"CPT-PA-count.csv")
 
 @st.cache_data
-def carregar_dados_cpt(arquivo_excel):
-    xls = pd.ExcelFile(arquivo_excel)
-    dados = []
-    
-    def normalizar_nome_municipio(nome):
-        nome = ''.join(c for c in unicodedata.normalize('NFD', str(nome).lower()) 
-                     if not unicodedata.combining(c))
-        correcoes = {
-            'sao felix do xingu': 'São Félix do Xingu',
-            'matupa': 'Matupá',
-            'senador jose porfirio': 'Senador José Porfírio',
-            'cumaru do norte': 'Cumaru do Norte'
-        }
-        return correcoes.get(nome.strip(), nome.strip().title())
+def carregar_dados_conflitos_municipio(arquivo_excel):
+    df = pd.read_excel(arquivo_excel, sheet_name='Áreas em Conflito', header=0).dropna(how='all')
+    df['mun'] = df['mun'].apply(lambda x: [unicodedata.normalize('NFD', str(m).lower()).encode('ascii', 'ignore').decode('ascii').strip().title() for m in str(x).split(',')])
+    df_exploded = df.explode('mun')
+    df_exploded['Famílias'] = pd.to_numeric(df_exploded['Famílias'], errors='coerce').fillna(0)
+    df_exploded['num_municipios'] = df_exploded.groupby('Nome do Conflito')['mun'].transform('nunique')
+    df_exploded['Famílias_por_municipio'] = df_exploded['Famílias'] / df_exploded['num_municipios']
+    df_conflitos = df_exploded.groupby('mun').agg({'Famílias_por_municipio': 'sum', 'Nome do Conflito': 'count'}).reset_index()
+    df_conflitos.columns = ['Município', 'Total_Famílias', 'Número_Conflitos']
+    return df_conflitos
 
-    for aba in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=aba, header=0).dropna(how='all')
-        
-        if aba == 'Ameaçados' and not df.empty:
-            dados.append({
-                'Tipo': 'Ameaçados',
-                'Famílias': df['Famílias'].sum(),
-                'Área_ha': df['Área'].sum(),
-                'Casas_Destruídas': df['Casas Destruídas'].sum()
-            })
-            
-        elif aba == 'Áreas em Conflito' and not df.empty:
-            df['Município'] = df['mun'].apply(
-                lambda x: [normalizar_nome_municipio(m) for m in str(x).split(',')]
-            )
-            df = df.explode('Município')
-            conflitos = df.groupby('Município').size().reset_index(name='Contagem')
-            
-            dados.append({
-                'Tipo': 'Áreas em Conflito',
-                'Municípios_Únicos': df['Município'].nunique(),
-                'Famílias_Risco': df['Famílias'].sum(),
-                'Conflitos_Por_Municipio': conflitos.to_dict('records')
-            })
-            
-        elif aba == 'Assassinatos' and not df.empty:
-            dados.append({
-                'Tipo': 'Assassinatos',
-                'Vítimas_Totais': df['Vítimas'].sum(),
-                'Ano_Último_Caso': df['Data'].dt.year.max()
-            })
-            
-        elif aba == 'Ocupações Retomadas' and not df.empty:
-            dados.append({
-                'Tipo': 'Ocupações Retomadas',
-                'Área_Total_ha': df['Área'].sum(),
-                'Média_Famílias': df['Famílias'].mean()
-            })
-
-    return pd.DataFrame(dados).reset_index(drop=True)
-
+df_conflitos_municipio = carregar_dados_conflitos_municipio(r"CPTF-PA.xlsx")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
@@ -412,7 +368,7 @@ for trace in contagens_fig.data:
 
 contagens_fig.update_yaxes(tickformat=",")
 contagens_fig.update_layout(
-    **common_layout,
+    **common_layout,    
     hovermode="x unified",
     showlegend=False
 )
@@ -447,60 +403,82 @@ with col1:
     render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef)
 
 with col2:
-    tab1, tab2 = st.tabs(["Sobreposições", "Ocupações Retomadas"])
+    tab1, tab2, tab3 = st.tabs(["Sobreposições", "Ocupações Retomadas", "Famílias"])
     
     with tab1:
         st.plotly_chart(bar_fig, use_container_width=True)
         st.plotly_chart(contagens_fig, use_container_width=True)
     
-    with tab2:
-        lollipop_fig = px.bar(
-            df_csv.sort_values('Áreas de conflitos', ascending=False),
-            x='Áreas de conflitos',
+        with tab2:
+            lollipop_fig = px.bar(
+                df_csv.sort_values('Áreas de conflitos', ascending=False),
+                x='Áreas de conflitos',
+                y='Município',
+                orientation='h',
+                color='Município',
+                color_discrete_sequence=px.colors.qualitative.Pastel1
+            )
+            lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+            lollipop_fig.update_layout(**common_layout, showlegend=False)
+            st.plotly_chart(lollipop_fig, use_container_width=True)
+        
+    with tab3:
+        df_conflitos_municipio['Município'] = df_conflitos_municipio['Município'].apply(lambda x: unicodedata.normalize('NFD', x).encode('ascii', 'ignore').decode('utf-8').strip().title())
+        df_conflitos_municipio = df_conflitos_municipio.sort_values('Total_Famílias', ascending=True)
+        
+        fig_familias = px.bar(
+            df_conflitos_municipio,
+            x='Total_Famílias',
             y='Município',
             orientation='h',
-            color='Município',
-            color_discrete_sequence=px.colors.qualitative.Pastel1
+            title='Total de Famílias Afetadas por Município',
+            labels={'Total_Famílias': 'Total de Famílias Afetadas', 'Município': 'Município'},
+            text='Total_Famílias',
+            color='Total_Famílias',
+            color_continuous_scale='viridis'
         )
-        lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-        lollipop_fig.update_layout(**common_layout, showlegend=False)
-        st.plotly_chart(lollipop_fig, use_container_width=True)
-
-
-# with tab4:
-#     st.header("Indicadores Sociais")
-#     
-#     try:
-#         df_cpt = "CPTF-PA.xlsx"
-# 
-#         if not df_cpt.empty:
-#             figuras = criar_graficos_cpt(df_cpt)
-#             for figura in figuras:
-#                 st.plotly_chart(figura, use_container_width=True)
-#         else:
-#             st.warning("Nenhum dado encontrado no arquivo CPT")
-#             
-#     except Exception as e:
-#         st.error(f"Falha ao carregar dados CPT: {str(e)}")
-#         df_cpt = pd.DataFrame()
-#     
-#     with tab1:
-#         st.plotly_chart(bar_fig, use_container_width=True)
-#         st.plotly_chart(contagens_fig, use_container_width=True)
-#     
-#     with tab2:
-#         lollipop_fig = px.bar(
-#             df_csv.sort_values('Áreas de conflitos', ascending=False),
-#             x='Áreas de conflitos',
-#             y='Município',
-#             orientation='h',
-#             color='Município',
-#             color_discrete_sequence=px.colors.qualitative.Pastel1
-#         )
-#         lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-#         lollipop_fig.update_layout(**common_layout, showlegend=False)
-#         st.plotly_chart(lollipop_fig, use_container_width=True)
-
+        fig_familias.update_layout(
+            height=600,
+            margin=dict(l=20, r=20, t=40, b=20),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial", size=12),
+            hovermode="y unified",
+            coloraxis_showscale=False
+        )
+        fig_familias.update_traces(
+            texttemplate='<b>%{text:.0f}</b>',
+            textposition='outside'
+        )
+        st.plotly_chart(fig_familias, use_container_width=True)
+        
+        df_conflitos_municipio = df_conflitos_municipio.sort_values('Número_Conflitos', ascending=True)
+        
+        fig_conflitos = px.bar(
+            df_conflitos_municipio,
+            x='Número_Conflitos',
+            y='Município',
+            orientation='h',
+            title='Número de Conflitos por Município',
+            labels={'Número_Conflitos': 'Número de Conflitos', 'Município': 'Município'},
+            text='Número_Conflitos',
+            color='Número_Conflitos',
+            color_continuous_scale='viridis'
+        )
+        fig_conflitos.update_layout(
+            height=600,
+            margin=dict(l=20, r=20, t=40, b=20),
+            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)',
+            font=dict(family="Arial", size=12),
+            hovermode="y unified",
+            coloraxis_showscale=False
+        )
+        fig_conflitos.update_traces(
+            texttemplate='<b>%{text:.0f}</b>',
+            textposition='outside'
+        )
+        st.plotly_chart(fig_conflitos, use_container_width=True)
 
 st.markdown("""
 <style>
