@@ -68,7 +68,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel):
     df_conflitos.columns = ['Município', 'Total_Famílias', 'Número_Conflitos']
     return df_conflitos
 
-df_conflitos_municipio = carregar_dados_conflitos_municipio(r"áreas-selecionadas\CPTF-PA.xlsx")
+df_conflitos_municipio = carregar_dados_conflitos_municipio(r"CPTF-PA.xlsx")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
