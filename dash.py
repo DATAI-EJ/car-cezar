@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import unicodedata
 
+
 df_cpt = pd.DataFrame()
 
 st.set_page_config(page_title="Dashboard", layout="wide")
@@ -67,7 +68,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel):
     df_conflitos.columns = ['Município', 'Total_Famílias', 'Número_Conflitos']
     return df_conflitos
 
-df_conflitos_municipio = carregar_dados_conflitos_municipio(r"CPTF-PA.xlsx")
+df_conflitos_municipio = carregar_dados_conflitos_municipio(r"áreas-selecionadas\CPTF-PA.xlsx")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
@@ -393,6 +394,89 @@ else:
     gdf_cnuc_filtrado = gpd.sjoin(gdf_cnuc, gdf_sigef_filtrado, how="inner", predicate="intersects")
     ids_selecionados = gdf_cnuc_filtrado["id"].unique().tolist()
 
+
+df = pd.read_csv(r'processos_tjpa_completo_atualizada_pronto.csv',sep = ';', encoding = 'windows-1252')
+
+municipio_counts = df['municipio'].value_counts().head(10).sort_values(ascending=False)
+df_municipios = municipio_counts.reset_index()
+df_municipios.columns = ['Município', 'Quantidade de Processos']
+fig_municipio = px.bar(
+    df_municipios,
+    x='Quantidade de Processos',
+    y='Município',
+    orientation='h',
+    title='Top 10 Municípios com mais Processos',
+    color='Município',
+    color_discrete_sequence=px.colors.qualitative.Pastel,
+    template='plotly_white'
+)
+fig_municipio.update_layout(showlegend=False)
+
+df['data_ajuizamento'] = pd.to_datetime(df['data_ajuizamento'], errors='coerce')
+if df['data_ajuizamento'].isnull().sum() > 0:
+    print("Atenção: Existem datas inválidas que foram convertidas para NaT.")
+df['ano_mes'] = df['data_ajuizamento'].dt.to_period('M').dt.to_timestamp()
+novembro_2013 = pd.Timestamp('2013-11-01')
+if novembro_2013 in df['ano_mes'].unique():
+    count_nov_2013 = df[df['ano_mes'] == novembro_2013].shape[0]
+    print(f"Número de processos em novembro de 2013: {count_nov_2013}")
+processos_por_mes = df.groupby('ano_mes').size().sort_index()
+df_mensal = processos_por_mes.reset_index()
+df_mensal.columns = ['Ano-Mês', 'Quantidade de Processos']
+fig_temporal = px.line(
+    df_mensal,
+    x='Ano-Mês',
+    y='Quantidade de Processos',
+    title='Distribuição dos Processos ao Longo do Tempo',
+    markers=True,
+    labels={'Ano-Mês': 'Ano-Mês', 'Quantidade de Processos': 'Qtd. de Processos'},
+    template='plotly_white',
+    color_discrete_sequence=['#FEA3AA']
+)
+
+classe_df = df['classe'].value_counts().head(10).sort_values(ascending=False).reset_index()
+classe_df.columns = ['Classe', 'Quantidade']
+fig_classe = px.bar(
+    classe_df,
+    x='Quantidade',
+    y='Classe',
+    orientation='h',
+    title='Top 10 Classes de Processos',
+    color='Classe',
+    color_discrete_sequence=px.colors.qualitative.Pastel1,
+    template='plotly_white'
+)
+fig_classe.update_layout(showlegend=False)
+
+assuntos_df = df['assuntos'].value_counts().head(10).sort_values(ascending=False).reset_index()
+assuntos_df.columns = ['Assunto', 'Quantidade']
+fig_assuntos = px.bar(
+    assuntos_df,
+    x='Quantidade',
+    y='Assunto',
+    orientation='h',
+    title='Top 10 Assuntos dos Processos',
+    color='Assunto',
+    color_discrete_sequence=px.colors.qualitative.Pastel2,
+    template='plotly_white'
+)
+fig_assuntos.update_layout(showlegend=False)
+
+orgao_counts = df['orgao_julgador'].value_counts().head(10).sort_values(ascending=False)
+df_orgaos = orgao_counts.reset_index()
+df_orgaos.columns = ['Órgão Julgador', 'Quantidade de Processos']
+fig_orgaos = px.bar(
+    df_orgaos,
+    x='Quantidade de Processos',
+    y='Órgão Julgador',
+    orientation='h',
+    title='Top 10 Órgãos Julgadores com Mais Processos',
+    color='Órgão Julgador',
+    color_discrete_sequence=px.colors.qualitative.Pastel,
+    template='plotly_white'
+)
+fig_orgaos.update_layout(showlegend=False)
+
 fig = criar_figura(ids_selecionados, invadindo_opcao)
 perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(ids_selecionados, invadindo_opcao)
 
@@ -403,29 +487,29 @@ with col1:
     render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef)
 
 with col2:
-    tab1, tab2, tab3 = st.tabs(["Sobreposições", "Ocupações Retomadas", "Famílias"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Sobreposições", "Ocupações Retomadas", "Famílias", "Justiça"])
     
     with tab1:
         st.plotly_chart(bar_fig, use_container_width=True)
         st.plotly_chart(contagens_fig, use_container_width=True)
     
-        with tab2:
-            lollipop_fig = px.bar(
-                df_csv.sort_values('Áreas de conflitos', ascending=False),
-                x='Áreas de conflitos',
-                y='Município',
-                orientation='h',
-                color='Município',
-                color_discrete_sequence=px.colors.qualitative.Pastel1
-            )
-            lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-            lollipop_fig.update_layout(**common_layout, showlegend=False)
-            st.plotly_chart(lollipop_fig, use_container_width=True)
+    with tab2:
+        lollipop_fig = px.bar(
+            df_csv.sort_values('Áreas de conflitos', ascending=False),
+            x='Áreas de conflitos',
+            y='Município',
+            orientation='h',
+            color='Município',
+            color_discrete_sequence=px.colors.qualitative.Pastel1
+        )
+        lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+        lollipop_fig.update_layout(**common_layout, showlegend=False)
+        st.plotly_chart(lollipop_fig, use_container_width=True)
         
     with tab3:
         df_conflitos_municipio['Município'] = df_conflitos_municipio['Município'].apply(lambda x: unicodedata.normalize('NFD', x).encode('ascii', 'ignore').decode('utf-8').strip().title())
-        df_conflitos_municipio = df_conflitos_municipio.sort_values('Total_Famílias', ascending=True)
         
+        df_conflitos_municipio = df_conflitos_municipio.sort_values('Total_Famílias', ascending=False)
         fig_familias = px.bar(
             df_conflitos_municipio,
             x='Total_Famílias',
@@ -434,8 +518,8 @@ with col2:
             title='Total de Famílias Afetadas por Município',
             labels={'Total_Famílias': 'Total de Famílias Afetadas', 'Município': 'Município'},
             text='Total_Famílias',
-            color='Total_Famílias',
-            color_continuous_scale='viridis'
+            color='Município',
+            color_discrete_sequence=px.colors.qualitative.Pastel
         )
         fig_familias.update_layout(
             height=600,
@@ -444,16 +528,12 @@ with col2:
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(family="Arial", size=12),
             hovermode="y unified",
-            coloraxis_showscale=False
+            showlegend=False
         )
-        fig_familias.update_traces(
-            texttemplate='<b>%{text:.0f}</b>',
-            textposition='outside'
-        )
+        fig_familias.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
         st.plotly_chart(fig_familias, use_container_width=True)
-        
-        df_conflitos_municipio = df_conflitos_municipio.sort_values('Número_Conflitos', ascending=True)
-        
+    
+        df_conflitos_municipio = df_conflitos_municipio.sort_values('Número_Conflitos', ascending=False)
         fig_conflitos = px.bar(
             df_conflitos_municipio,
             x='Número_Conflitos',
@@ -462,8 +542,8 @@ with col2:
             title='Número de Conflitos por Município',
             labels={'Número_Conflitos': 'Número de Conflitos', 'Município': 'Município'},
             text='Número_Conflitos',
-            color='Número_Conflitos',
-            color_continuous_scale='viridis'
+            color='Município',
+            color_discrete_sequence=px.colors.qualitative.Pastel
         )
         fig_conflitos.update_layout(
             height=600,
@@ -472,14 +552,30 @@ with col2:
             paper_bgcolor='rgba(0,0,0,0)',
             font=dict(family="Arial", size=12),
             hovermode="y unified",
-            coloraxis_showscale=False
+            showlegend=False
         )
-        fig_conflitos.update_traces(
-            texttemplate='<b>%{text:.0f}</b>',
-            textposition='outside'
-        )
+        fig_conflitos.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
         st.plotly_chart(fig_conflitos, use_container_width=True)
-
+    
+    with tab4:
+        subtab1, subtab2, subtab3, subtab4, subtab5 = st.tabs([
+            "Municípios", "Temporal", "Classes", "Assuntos", "Órgãos"
+        ])
+        
+        with subtab1:
+            st.plotly_chart(fig_municipio, use_container_width=True)
+        
+        with subtab2:
+            st.plotly_chart(fig_temporal, use_container_width=True)
+        
+        with subtab3:
+            st.plotly_chart(fig_classe, use_container_width=True)
+        
+        with subtab4:
+            st.plotly_chart(fig_assuntos, use_container_width=True)
+        
+        with subtab5:
+            st.plotly_chart(fig_orgaos, use_container_width=True)
 st.markdown("""
 <style>
 [data-testid="stAppViewContainer"] {
