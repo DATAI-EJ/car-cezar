@@ -10,6 +10,29 @@ df_cpt = pd.DataFrame()
 
 st.set_page_config(page_title="Dashboard", layout="wide")
 
+custom_template = {
+    'layout': go.Layout(
+        font=dict(family="Times New Roman", size=12),
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        colorway=px.colors.qualitative.Pastel,
+        margin=dict(l=20, r=20, t=40, b=20),
+        xaxis=dict(showgrid=False),
+        yaxis=dict(showgrid=False),
+        hoverlabel=dict(
+            bgcolor="white",
+            font_size=12,
+            font_family="Times New Roman"
+        )
+    )
+}
+px.defaults.template = custom_template
+
+
+
+px.defaults.template = custom_template
+
+
 @st.cache_data
 def carregar_shapefile(caminho, calcular_percentuais=True):
     gdf = gpd.read_file(caminho)
@@ -68,7 +91,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel):
     df_conflitos.columns = ['Município', 'Total_Famílias', 'Número_Conflitos']
     return df_conflitos
 
-df_conflitos_municipio = carregar_dados_conflitos_municipio(r"CPTF-PA.xlsx")
+df_conflitos_municipio = carregar_dados_conflitos_municipio(r"áreas-selecionadas\CPTF-PA.xlsx")
 
 def criar_figura(ids_selecionados, invadindo_opcao):
     fig = px.choropleth_mapbox(
@@ -156,35 +179,6 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             height=800  
         )
     return fig
-
-def criar_graficos_cpt(df):
-    figs = []
-    
-    if 'Ameaçados' in df['Tipo'].values:
-        df_ameaca = df[df['Tipo'] == 'Ameaçados']
-        fig = px.bar(
-            df_ameaca,
-            x='Tipo',
-            y=['Famílias', 'Área_ha', 'Casas_Destruídas'],
-            title='Distribuição de Ameaças',
-            labels={'value': 'Quantidade', 'variable': 'Categoria'},
-            barmode='group'
-        )
-        figs.append(fig)
-    
-    if 'Áreas em Conflito' in df['Tipo'].values:
-        df_conflito = df[df['Tipo'] == 'Áreas em Conflito']
-        fig = px.scatter(
-            df_conflito,
-            x='Municípios_Únicos',
-            y='Total_Conflitos',
-            size='Famílias_Risco',
-            title='Relação Conflitos vs Municípios',
-            color='Total_Conflitos'
-        )
-        figs.append(fig)
-    
-    return figs
 
 def criar_cards(ids_selecionados, invadindo_opcao):
     try:
@@ -316,63 +310,6 @@ gdf_cnuc_ha['alerta_ha'] = gdf_cnuc_ha['alerta_km2'] * 100
 gdf_cnuc_ha['sigef_ha'] = gdf_cnuc_ha['sigef_km2'] * 100
 gdf_cnuc_ha['area_ha']   = gdf_cnuc_ha['area_km2'] * 100
 
-bar_fig = px.bar(
-    gdf_cnuc_ha,
-    x='nome_uc',
-    y=['alerta_ha', 'sigef_ha', 'area_ha'],
-    labels={'value': "Área (ha)", "nome_uc": "Nome UC"},
-    color_discrete_map={
-        "alerta_ha": 'rgb(251,180,174)', 
-        "sigef_ha": 'rgb(179,205,227)', 
-        "area_ha": 'rgb(204,235,197)'
-    },
-    barmode='stack',
-    text_auto=True
-)
-
-for trace in bar_fig.data:
-    trace.texttemplate = '%{y:.0f} ha'
-    trace.textposition = 'inside'
-    trace.hovertemplate = (
-        "<b>%{x}</b><br>" +
-        trace.name + ": %{y:,.0f}" +
-        "<extra></extra>"
-    )
-
-bar_fig.update_yaxes(tickformat=",")
-bar_fig.update_layout(
-    **common_layout,
-    hovermode="x unified",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-)
-
-contagens_fig = px.bar(
-    gdf_cnuc,
-    x='nome_uc',
-    y=['c_alertas', 'c_sigef'],
-    labels={'value': "Contagens", "nome_uc": "Nome UC"},
-    color_discrete_map={
-        "c_alertas": 'rgb(251,180,174)', 
-        "c_sigef": 'rgb(179,205,227)'
-    },
-    barmode='stack'
-)
-
-for trace in contagens_fig.data:
-    trace.texttemplate = '%{y:.0f}'
-    trace.textposition = 'inside'
-    trace.hovertemplate = (
-        "<b>%{x}</b><br>" +
-        trace.name + ": %{y:,.0f}" +
-        "<extra></extra>"
-    )
-
-contagens_fig.update_yaxes(tickformat=",")
-contagens_fig.update_layout(
-    **common_layout,    
-    hovermode="x unified",
-    showlegend=False
-)
 
 st.header("Análise de Conflitos em Áreas Protegidas e Territórios Tradicionais")
 st.caption("Monitoramento integrado de sobreposições em Unidades de Conservação, Terras Indígenas e Territórios Quilombolas")
@@ -393,7 +330,6 @@ else:
     gdf_sigef_filtrado = gdf_sigef[gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.strip().lower()]
     gdf_cnuc_filtrado = gpd.sjoin(gdf_cnuc, gdf_sigef_filtrado, how="inner", predicate="intersects")
     ids_selecionados = gdf_cnuc_filtrado["id"].unique().tolist()
-
 
 df = pd.read_csv(r'processos_tjpa_completo_atualizada_pronto.csv',sep = ';', encoding = 'windows-1252')
 
@@ -480,113 +416,183 @@ fig_orgaos.update_layout(showlegend=False)
 fig = criar_figura(ids_selecionados, invadindo_opcao)
 perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(ids_selecionados, invadindo_opcao)
 
-col1, col2 = st.columns([8, 4], gap="large")
+with st.container():
+    col_mapa, col_detalhes = st.columns([8, 4], gap="large")
+    
+    with col_mapa:
+        st.plotly_chart(fig, use_container_width=True, height=700)
+        render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef)
+    
+    with col_detalhes:
+        with st.expander("Detalhes e Análises", expanded=True):
+            tab_sobreposicoes, tab_ocupacoes, tab_familias, tab_justica = st.tabs([
+                "Sobreposições", "Ocupações Retomadas", "Famílias", "Justiça"
+            ])
+            
+            with tab_sobreposicoes:
+                subtab_areas, subtab_contagens = st.tabs(["Áreas", "Contagens"])
+                with subtab_areas:
+                    bar_fig = px.bar(
+                        gdf_cnuc_ha, 
+                        x='nome_uc',
+                        y=['alerta_ha', 'sigef_ha', 'area_ha'],
+                        labels={'value': "Área (ha)", "nome_uc": "Nome UC"},
+                        color_discrete_map={
+                            "alerta_ha": px.colors.qualitative.Pastel[0],
+                            "sigef_ha": px.colors.qualitative.Pastel[1],   
+                            "area_ha": px.colors.qualitative.Pastel[2]     
+                        },
+                        barmode='stack',
+                        text_auto=True,
+                        height=600,
+                        width=1200,
+                        title='Áreas por Unidade de Conservação',
+                        template='plotly_white' 
+                    )
 
-with col1:
-    st.plotly_chart(fig, use_container_width=True, height=700)
-    render_cards(perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef)
+                    for trace in bar_fig.data:
+                        trace.texttemplate = '%{y:,.0f} ha'
+                        trace.textposition = 'inside'
+                        trace.textfont = dict(size=12, color='black')
+                        trace.hovertemplate = (
+                            "<b>%{x}</b><br>" +
+                            trace.name + ": %{y:,.0f} ha" +
+                            "<extra></extra>"
+                        )
+                        trace.marker = dict(
+                            line=dict(color='rgb(80,80,80)', width=0.5)
+                        )
+                    bar_fig.update_layout(
+                        hovermode="x unified",
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom",
+                            y=1.02,
+                            xanchor="right",
+                            x=1,
+                            font=dict(size=12),
+                            bgcolor='rgba(255,255,255,0.8)'
+                        ),
+                        xaxis=dict(tickangle=45, title_standoff=20, automargin=True),
+                        yaxis=dict(tickformat=",", gridcolor='rgba(200,200,200,0.3)', title_standoff=15),
+                        plot_bgcolor='rgba(245,245,245,0.5)',
+                        margin=dict(l=60, r=60, t=100, b=120),
+                        bargap=0.2
+                    )
+                    bar_fig.update_traces(opacity=0.9, textangle=0, insidetextanchor='middle')
+                    st.plotly_chart(bar_fig, use_container_width=True)
+                
+                with subtab_contagens:
+                    contagens_fig = px.bar(
+                        gdf_cnuc, 
+                        x='nome_uc',
+                        y=['c_alertas', 'c_sigef'],
+                        labels={'value': "Contagens", "nome_uc": "Nome UC"},
+                        color_discrete_map={
+                            "c_alertas": 'rgb(251,180,174)', 
+                            "c_sigef": 'rgb(179,205,227)'
+                        },
+                        barmode='stack',
+                        title='Contagens por Unidade de Conservação',
+                        height=600, 
+                        width=1000
+                    )
+                    contagens_fig.update_layout(
+                        xaxis_title="Unidades de Conservação",
+                        yaxis_title="Número de Contagens",
+                        legend_title="Tipo de Contagem",
+                        xaxis={'tickangle': 45},
+                        yaxis={'gridcolor': 'rgba(200,200,200,0.2)'},
+                        margin=dict(l=50, r=50, t=100, b=100),
+                        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99),
+                        plot_bgcolor='rgba(240,240,240,0.5)'
+                    )
+                    contagens_fig.update_traces(
+                        marker=dict(line=dict(color='rgb(100,100,100)', width=0.5)),
+                        opacity=0.9
+                    )
+                    for trace in contagens_fig.data:
+                        trace.texttemplate = '%{y:.0f}'
+                        trace.textposition = 'inside'
+                        trace.hovertemplate = (
+                            "<b>%{x}</b><br>" +
+                            trace.name + ": %{y:,.0f}" +
+                            "<extra></extra>"
+                        )
+                    contagens_fig.update_yaxes(tickformat=",")
+                    st.plotly_chart(contagens_fig, use_container_width=True)
+            
+            with tab_ocupacoes:
+                lollipop_fig = px.bar(
+                    df_csv.sort_values('Áreas de conflitos', ascending=False),
+                    x='Áreas de conflitos',
+                    y='Município',
+                    orientation='h',
+                    color='Município',
+                    color_discrete_sequence=px.colors.qualitative.Pastel1
+                )
+                lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
+                lollipop_fig.update_layout(**common_layout, showlegend=False)
+                st.plotly_chart(lollipop_fig, use_container_width=True)
+            
+            with tab_familias:
+                sub_fam1, sub_fam2 = st.tabs(["Famílias Afetadas", "Conflitos"])
+                with sub_fam1:
+                    df_conflitos_municipio['Município'] = df_conflitos_municipio['Município'].apply(lambda x: x.title())
+                    df_sorted = df_conflitos_municipio.sort_values('Total_Famílias', ascending=False)
+                    fig_familias = px.bar(
+                        df_sorted,
+                        x='Total_Famílias',
+                        y='Município',
+                        orientation='h',
+                        labels={'Total_Famílias': 'Famílias Afetadas'},
+                        text='Total_Famílias',
+                        color='Município',
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_familias.update_layout(**common_layout, showlegend=False)
+                    fig_familias.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
+                    st.plotly_chart(fig_familias, use_container_width=True)
+                with sub_fam2:
+                    df_conflitos_municipio['Município'] = df_conflitos_municipio['Município'].apply(lambda x: x.title())
+                    df_sorted = df_conflitos_municipio.sort_values('Número_Conflitos', ascending=False)
+                    fig_conflitos = px.bar(
+                        df_sorted,
+                        x='Número_Conflitos',
+                        y='Município',
+                        orientation='h',
+                        labels={'Número_Conflitos': 'Conflitos Registrados'},
+                        text='Número_Conflitos',
+                        color='Município',
+                        color_discrete_sequence=px.colors.qualitative.Pastel
+                    )
+                    fig_conflitos.update_layout(**common_layout, showlegend=False)
+                    fig_conflitos.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
+                    st.plotly_chart(fig_conflitos, use_container_width=True)
+            
+            with tab_justica:
+                justice_tabs = st.tabs(["Municípios", "Temporal", "Classes", "Assuntos", "Órgãos"])
+                with justice_tabs[0]:
+                    st.plotly_chart(fig_municipio, use_container_width=True)
+                with justice_tabs[1]:
+                    st.plotly_chart(fig_temporal, use_container_width=True)
+                with justice_tabs[2]:
+                    st.plotly_chart(fig_classe, use_container_width=True)
+                with justice_tabs[3]:
+                    st.plotly_chart(fig_assuntos, use_container_width=True)
+                with justice_tabs[4]:
+                    st.plotly_chart(fig_orgaos, use_container_width=True)
 
-with col2:
-    tab1, tab2, tab3, tab4 = st.tabs(["Sobreposições", "Ocupações Retomadas", "Famílias", "Justiça"])
-    
-    with tab1:
-        st.plotly_chart(bar_fig, use_container_width=True)
-        st.plotly_chart(contagens_fig, use_container_width=True)
-    
-    with tab2:
-        lollipop_fig = px.bar(
-            df_csv.sort_values('Áreas de conflitos', ascending=False),
-            x='Áreas de conflitos',
-            y='Município',
-            orientation='h',
-            color='Município',
-            color_discrete_sequence=px.colors.qualitative.Pastel1
-        )
-        lollipop_fig.update_traces(marker=dict(line=dict(width=1, color='DarkSlateGrey')))
-        lollipop_fig.update_layout(**common_layout, showlegend=False)
-        st.plotly_chart(lollipop_fig, use_container_width=True)
-        
-    with tab3:
-        df_conflitos_municipio['Município'] = df_conflitos_municipio['Município'].apply(lambda x: unicodedata.normalize('NFD', x).encode('ascii', 'ignore').decode('utf-8').strip().title())
-        
-        df_conflitos_municipio = df_conflitos_municipio.sort_values('Total_Famílias', ascending=False)
-        fig_familias = px.bar(
-            df_conflitos_municipio,
-            x='Total_Famílias',
-            y='Município',
-            orientation='h',
-            title='Total de Famílias Afetadas por Município',
-            labels={'Total_Famílias': 'Total de Famílias Afetadas', 'Município': 'Município'},
-            text='Total_Famílias',
-            color='Município',
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_familias.update_layout(
-            height=600,
-            margin=dict(l=20, r=20, t=40, b=20),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Arial", size=12),
-            hovermode="y unified",
-            showlegend=False
-        )
-        fig_familias.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
-        st.plotly_chart(fig_familias, use_container_width=True)
-    
-        df_conflitos_municipio = df_conflitos_municipio.sort_values('Número_Conflitos', ascending=False)
-        fig_conflitos = px.bar(
-            df_conflitos_municipio,
-            x='Número_Conflitos',
-            y='Município',
-            orientation='h',
-            title='Número de Conflitos por Município',
-            labels={'Número_Conflitos': 'Número de Conflitos', 'Município': 'Município'},
-            text='Número_Conflitos',
-            color='Município',
-            color_discrete_sequence=px.colors.qualitative.Pastel
-        )
-        fig_conflitos.update_layout(
-            height=600,
-            margin=dict(l=20, r=20, t=40, b=20),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            font=dict(family="Arial", size=12),
-            hovermode="y unified",
-            showlegend=False
-        )
-        fig_conflitos.update_traces(texttemplate='<b>%{text:.0f}</b>', textposition='outside')
-        st.plotly_chart(fig_conflitos, use_container_width=True)
-    
-    with tab4:
-        subtab1, subtab2, subtab3, subtab4, subtab5 = st.tabs([
-            "Municípios", "Temporal", "Classes", "Assuntos", "Órgãos"
-        ])
-        
-        with subtab1:
-            st.plotly_chart(fig_municipio, use_container_width=True)
-        
-        with subtab2:
-            st.plotly_chart(fig_temporal, use_container_width=True)
-        
-        with subtab3:
-            st.plotly_chart(fig_classe, use_container_width=True)
-        
-        with subtab4:
-            st.plotly_chart(fig_assuntos, use_container_width=True)
-        
-        with subtab5:
-            st.plotly_chart(fig_orgaos, use_container_width=True)
 st.markdown("""
 <style>
-[data-testid="stAppViewContainer"] {
-    background: #f5f7fa;
+/* Ajusta o padding dos containers internos */
+.css-1d391kg {
+    padding: 1rem;
 }
-[data-testid="stHeader"] {
-    background: rgba(0,116,217,0.1);
-}
-[data-testid="stSidebar"] {
-    background: #ffffff;
-    border-right: 1px solid #e1e4e8;
+
+/* Cria mais espaço entre os blocos horizontais */
+[data-testid="stHorizontalBlock"] {
+    margin-bottom: 1.5rem;
 }
 </style>
 """, unsafe_allow_html=True)
