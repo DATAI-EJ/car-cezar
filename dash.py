@@ -5,9 +5,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 import unicodedata
 
-
-df_cpt = pd.DataFrame()
-
 st.set_page_config(page_title="Dashboard", layout="wide")
 
 custom_template = {
@@ -28,9 +25,6 @@ custom_template = {
 }
 px.defaults.template = custom_template
 
-
-
-px.defaults.template = custom_template
 
 
 @st.cache_data
@@ -343,8 +337,7 @@ fig_municipio = px.bar(
     orientation='h',
     title='Top 10 Municípios com mais Processos',
     color='Município',
-    color_discrete_sequence=px.colors.qualitative.Pastel,
-    template='plotly_white'
+    color_discrete_sequence=px.colors.qualitative.Pastel
 )
 fig_municipio.update_layout(showlegend=False)
 
@@ -366,7 +359,6 @@ fig_temporal = px.line(
     title='Distribuição dos Processos ao Longo do Tempo',
     markers=True,
     labels={'Ano-Mês': 'Ano-Mês', 'Quantidade de Processos': 'Qtd. de Processos'},
-    template='plotly_white',
     color_discrete_sequence=['#FEA3AA']
 )
 
@@ -379,8 +371,7 @@ fig_classe = px.bar(
     orientation='h',
     title='Top 10 Classes de Processos',
     color='Classe',
-    color_discrete_sequence=px.colors.qualitative.Pastel1,
-    template='plotly_white'
+    color_discrete_sequence=px.colors.qualitative.Pastel1
 )
 fig_classe.update_layout(showlegend=False)
 
@@ -393,8 +384,7 @@ fig_assuntos = px.bar(
     orientation='h',
     title='Top 10 Assuntos dos Processos',
     color='Assunto',
-    color_discrete_sequence=px.colors.qualitative.Pastel2,
-    template='plotly_white'
+    color_discrete_sequence=px.colors.qualitative.Pastel2
 )
 fig_assuntos.update_layout(showlegend=False)
 
@@ -408,8 +398,7 @@ fig_orgaos = px.bar(
     orientation='h',
     title='Top 10 Órgãos Julgadores com Mais Processos',
     color='Órgão Julgador',
-    color_discrete_sequence=px.colors.qualitative.Pastel,
-    template='plotly_white'
+    color_discrete_sequence=px.colors.qualitative.Pastel
 )
 fig_orgaos.update_layout(showlegend=False)
 
@@ -417,7 +406,7 @@ fig = criar_figura(ids_selecionados, invadindo_opcao)
 perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(ids_selecionados, invadindo_opcao)
 
 with st.container():
-    col_mapa, col_detalhes = st.columns([8, 4], gap="large")
+    col_mapa, col_detalhes = st.columns([6, 4], gap="large")
     
     with col_mapa:
         st.plotly_chart(fig, use_container_width=True, height=700)
@@ -446,8 +435,7 @@ with st.container():
                         text_auto=True,
                         height=600,
                         width=1200,
-                        title='Áreas por Unidade de Conservação',
-                        template='plotly_white' 
+                        title='Áreas por Unidade de Conservação'
                     )
 
                     for trace in bar_fig.data:
