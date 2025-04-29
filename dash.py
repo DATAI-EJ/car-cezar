@@ -624,114 +624,88 @@ def fig_conflitos(df_conflitos: pd.DataFrame) -> go.Figure:
     )
     return fig
 
+def clean_text(text: str) -> str:
+    if pd.isna(text): return text
+    text = str(text).strip().lower()
+    return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+
 def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
     figs = {}
     palette = px.defaults.color_discrete_sequence
-    bottom_margin = 150
+    bottom_margin = 100
 
     mapa_classes = {
-        "Procedimento Comum Cível": "Proc. Comum",
-        "Cumprimento de sentença": "Cumpr. Sentença",
-        "Ação Civil Pública": "Ação Civil Púb.",
-        "Mandado de Segurança Cível": "MS Cível",
-        "Execução Fiscal": "Exec. Fiscal",
-        "Ação Ordinária": "Ação Ord.",
-        "Ação de Obrigação de Fazer / Não Fazer": "Obrig. Fazer/NF",
-        "Outros Procedimentos de Jurisdição Contenciosa": "Outros Contenc.",
-        "Petição": "Petição",
-        "Ação de Improbidade Administrativa": "Improbidade Adm."
+        "procedimento comum civel": "Proc. Comum Cível",
+        "acao civil publica": "Ação Civil Pública",
+        "peticao civel": "Petição Cível",
+        "cumprimento de sentenca": "Cumpr. Sentença",
+        "termo circunstanciado": "Termo Circunstan.",
+        "carta precatoria civel": "Carta Prec. Cível",
+        "acao penal - procedimento ordinario": "Ação Penal Ordinária",
+        "alvara judicial - lei 6858/80": "Alvará Judicial",
+        "crimes ambientais": "Crimes Ambientais",
+        "homologacao da transacao extrajudicial": "Homolog. Transação"
     }
 
     mapa_assuntos = {
-        "Direito Ambiental": "Ambiental",
-        "Dano Ambiental": "Dano Amb.",
-        "Direitos / Interesses Difusos / Coletivos": "Dir. Difusos",
-        "Direito Administrativo e Outras Matérias de Direito Público": "Dir. Admin. / Público",
-        "Direito do Consumidor": "Consumidor",
-        "Direito Processual Civil e do Trabalho": "Proc. Civil / Trab.",
-        "Assuntos Minerários": "Minerários",
-        "Indenização por Dano Moral": "Dano Moral"
+        "indenizacao por dano ambiental": "Dano Ambiental",
+        "obrigacao de fazer / nao fazer": "Obrig. Fazer/Não Fazer",
+        "flora": "Flora",
+        "fauna": "Fauna",
+        "mineracao": "Mineração",
+        "poluicao": "Poluição",
+        "unidade de conservacao da natureza": "Unid. Conservação",
+        "revogacao/anulacao de multa ambiental": "Anulação Multa Ambiental",
+        "area de preservacao permanente": "APP",
+        "agrotoxicos": "Agrotóxicos"
     }
 
     mapa_orgaos = {
-        "1ª VARA CÍVEL DA COMARCA DE ALTAMIRA": "1ª V. ALTAMIRA",
-        "VARA CÍVEL E EMPRESARIAL DE REDENÇÃO": "V. REDENÇÃO",
-        "COMARCA DE SÃO FÉLIX DO XINGU": "S.F. XINGU",
-        "VARA ÚNICA DE ANAPU": "V. ANAPU",
-        "VARA ÚNICA DE ULIANÓPOLIS": "V. ULIANÓPOLIS",
-        "VARA ÚNICA DE PACAJÁ": "V. PACAJÁ",
-        "VARA ÚNICA DE PLACAS": "V. PLACAS",
-        "VARA ÚNICA DE MEDICILÂNDIA": "V. MEDICILÂNDIA",
-        "VARA ÚNICA DE CUMARU DO NORTE": "V. CUMARU N."
+        "1a vara civel e empresarial de altamira": "1ª V. Cível Altamira",
+        "vara civil e empresarial da comarca de sao felix do xingu": "V. Cível São Félix",
+        "vara civel de novo progresso": "V. Cível Novo Progresso",
+        "2a vara civel e empresarial de altamira": "2ª V. Cível Altamira",
+        "3a vara civel e empresarial de altamira": "3ª V. Cível Altamira",
+        "1a vara civel e empresarial de itaituba": "1ª V. Cível Itaituba",
+        "juizado especial civel e criminal de itaituba": "JEC Itaituba",
+        "2a vara civel e empresarial de itaituba": "2ª V. Cível Itaituba",
+        "vara criminal de itaituba": "V. Criminal Itaituba",
+        "vara unica de jacareacanga": "V. Única Jacareacanga"
     }
 
-    top = (
-        df_proc['municipio']
-            .value_counts().head(10)
-            .rename_axis('Municipio')
-            .reset_index(name='Quantidade')
-    )
+    df_proc['municipio'] = df_proc['municipio'].apply(clean_text)
+    top = df_proc['municipio'].value_counts().head(10).reset_index()
+    top.columns = ['Municipio', 'Quantidade']
     top['label'] = top['Municipio'].apply(lambda x: wrap_label(x, 20))
-    fig_mun = px.bar(
-        top, x='label', y='Quantidade',
-        labels={'label': 'Município', 'Quantidade': 'Quantidade'},
-        color_discrete_sequence=palette
-    )
-    fig_mun.update_traces(texttemplate='%{y}', textposition='outside', cliponaxis=False)
-    fig_mun.update_layout(
-        margin=dict(l=80, r=60, t=50, b=bottom_margin),
-        height=400,
-        xaxis=dict(tickangle=45, automargin=True, tickmode='array', tickvals=top['label']),
-        yaxis=dict(range=[0, top['Quantidade'].max() * 1.1]),
-        xaxis_title=None,
-        yaxis_title=None
-    )
-    figs['mun'] = _apply_layout(fig_mun, title="Top 10 Municípios com Mais Processos", title_size=16)
+    fig_mun = px.bar(top, y='label', x='Quantidade', orientation='h', color_discrete_sequence=palette)
+    fig_mun.update_traces(texttemplate='%{x}', textposition='auto', cliponaxis=False)
+    fig_mun.update_layout(margin=dict(l=150, r=60, t=50, b=bottom_margin), height=500, yaxis=dict(autorange="reversed"))
+    figs['mun'] = _apply_layout(fig_mun, "Top 10 Municípios com Mais Processos", 16)
 
-    df_proc['ano_mes'] = pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce') \
-                             .dt.to_period('M').dt.to_timestamp()
+    df_proc['ano_mes'] = pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce').dt.to_period('M').dt.to_timestamp()
     mensal = df_proc.groupby('ano_mes').size().reset_index(name='Quantidade')
-    fig_temp = px.line(
-        mensal, x='ano_mes', y='Quantidade', markers=True,
-        labels={'ano_mes': 'Mês/Ano', 'Quantidade': 'Quantidade'}
-    )
-    fig_temp.update_layout(
-        margin=dict(l=80, r=60, t=50, b=bottom_margin),
-        height=400,
-        xaxis=dict(tickangle=45, automargin=True)
-    )
-    figs['temp'] = _apply_layout(fig_temp, title="Evolução Mensal de Processos", title_size=16)
+    fig_temp = px.line(mensal, x='ano_mes', y='Quantidade', markers=True)
+    fig_temp.update_layout(margin=dict(l=80, r=60, t=50, b=bottom_margin), height=400, yaxis=dict(range=[0, mensal['Quantidade'].max() * 1.1]))
+    figs['temp'] = _apply_layout(fig_temp, "Evolução Mensal de Processos", 16)
 
     mappings = [
         ('class', 'classe', 'Top 10 Classes Processuais', mapa_classes),
         ('ass', 'assuntos', 'Top 10 Assuntos', mapa_assuntos),
         ('org', 'orgao_julgador', 'Top 10 Órgãos Julgadores', mapa_orgaos)
     ]
-    for key, col, title, mapa in mappings:
-        df = (
-            df_proc[col]
-                .replace(mapa)
-                .value_counts().head(10)
-                .rename_axis(col)
-                .reset_index(name='Quantidade')
-        )
-        df['label'] = df[col].apply(lambda x: wrap_label(x, 20))
 
-        fig = px.bar(
-            df, x='label', y='Quantidade',
-            labels={'label': col.upper(), 'Quantidade': 'Quantidade'},
-            color_discrete_sequence=palette
-        )
-        fig.update_traces(texttemplate='%{y}', textposition='outside', cliponaxis=False)
-        fig.update_layout(
-            margin=dict(l=100, r=60, t=50, b=bottom_margin),
-            height=400,
-            xaxis=dict(tickangle=45, automargin=True),
-            yaxis=dict(range=[0, df['Quantidade'].max() * 1.1])
-        )
-        figs[key] = _apply_layout(fig, title=title, title_size=16)
+    for key, col, title, mapa in mappings:
+        df_proc[col] = df_proc[col].apply(clean_text)
+        df = df_proc[col].replace(mapa).value_counts().head(10).reset_index()
+        df.columns = [col, 'Quantidade']
+        df['label'] = df[col].apply(lambda x: wrap_label(x, 30))
+        fig = px.bar(df, y='label', x='Quantidade', orientation='h', color_discrete_sequence=palette)
+        fig.update_traces(texttemplate='%{x}', textposition='auto', cliponaxis=False)
+        fig.update_layout(margin=dict(l=180, r=60, t=50, b=bottom_margin), height=500, yaxis=dict(autorange="reversed"))
+        figs[key] = _apply_layout(fig, title, 16)
 
     return figs
+
 
 @st.cache_data
 def carregar_dados_fogo(
