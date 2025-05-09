@@ -1201,12 +1201,12 @@ with tabs[3]:
 with tabs[4]:
     st.header("Focos de Calor")
     files = [
-        r"focos_municipios_filtrados_part1.csv",
-        r"focos_municipios_filtrados_part2.csv",
-        r"focos_municipios_filtrados_part3.csv",
-        r"focos_municipios_filtrados_part4.csv",
-        r"focos_municipios_filtrados_part5.csv",
-        r"focos_municipios_filtrados_part6.csv",
+        "focos_municipios_filtrados_part1.csv",
+        "focos_municipios_filtrados_part2.csv",
+        "focos_municipios_filtrados_part3.csv",
+        "focos_municipios_filtrados_part4.csv",
+        "focos_municipios_filtrados_part5.csv",
+        "focos_municipios_filtrados_part6.csv",
     ]
     df_inpe = load_inpe(files)
     if not df_inpe.empty:
