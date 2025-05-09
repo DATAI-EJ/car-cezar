@@ -816,16 +816,6 @@ def carregar_dados_fogo(
     return df
 
 def criar_figuras_fogo(df: pd.DataFrame, ano: int | None = None) -> dict[str, go.Figure]:
-    """
-    Cria visualizações para análise de focos de calor.
-    
-    Args:
-        df: DataFrame com dados de focos de calor
-        ano: Ano para filtrar os dados (opcional)
-        
-    Returns:
-        Dicionário com figuras Plotly
-    """
     if ano is not None:
         df = df[df['date'].dt.year == ano]
     df = (
@@ -935,30 +925,23 @@ def app_fogo(caminho_csv: str, sep: str = ';', encoding: str = 'latin1'):
         st.plotly_chart(figs['top_municipios'], use_container_width=True)
 
 @st.cache_data(show_spinner=False)
-def load_inpe(filepath: str, chunksize: int = 100_000) -> pd.DataFrame:
+def load_inpe(filepaths: list[str], chunksize: int = 100_000) -> pd.DataFrame:
     cols = ['RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
-    with open(filepath, 'r', encoding='utf-8') as f:
-        sample = f.read(2048)
-    delim = ',' if sample.count(',') > sample.count(';') else ';'
     dfs = []
-    total = 0
+    total_chunks = 0
     progress = st.progress(0)
-    for i, chunk in enumerate(pd.read_csv(
-        filepath,
-        sep=delim,
-        usecols=cols,
-        iterator=True,
-        chunksize=chunksize,
-        encoding='utf-8'
-    )):
-        chunk = chunk.dropna()
-        chunk = chunk[chunk['RiscoFogo'] > 0]
-        dfs.append(chunk)
-        total += len(chunk)
-        progress.progress(min((i+1) * chunksize / (10 * chunksize), 1.0))
-    df = pd.concat(dfs, ignore_index=True)
-    return df
-    
+    for path in filepaths:
+        with open(path, 'r', encoding='utf-8') as f:
+            sample = f.read(2048)
+        delim = ',' if sample.count(',') > sample.count(';') else ';'
+        for i, chunk in enumerate(pd.read_csv(path, sep=delim, usecols=cols, iterator=True, chunksize=chunksize, encoding='utf-8')):
+            chunk = chunk.dropna()
+            chunk = chunk[chunk['RiscoFogo'] > 0]
+            dfs.append(chunk)
+            total_chunks += 1
+            progress.progress(min(total_chunks / (20 * len(filepaths)), 1.0))
+    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
+
 def graficos_inpe(df: pd.DataFrame) -> dict:
     figs = {}
     # Top 10 municípios por risco de fogo
@@ -998,7 +981,8 @@ def graficos_inpe(df: pd.DataFrame) -> dict:
         margin=dict(l=60, r=80, t=50, b=40)
     )
     figs['top_precip'] = fig_precip
-    # Mapa de dispersão
+
+    # Mapa de dispersão (sem alterações)
     max_points = 50_000
     df_plot = df.sample(max_points, random_state=1) if len(df) > max_points else df
 
@@ -1092,7 +1076,6 @@ perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar
     ids_selecionados,
     invadindo_opcao
 )
-
 
 tabs = st.tabs(["Sobreposições", "Queimadas", "Famílias", "Justiça", "INPE"])
 
@@ -1217,8 +1200,15 @@ with tabs[3]:
 
 with tabs[4]:
     st.header("Focos de Calor")
-    inpe_path = r"focos_municipios_filtrados.csv"
-    df_inpe = load_inpe(inpe_path)
+    files = [
+        r"focos_municipios_filtrados_part1.csv",
+        r"focos_municipios_filtrados_part2.csv",
+        r"focos_municipios_filtrados_part3.csv",
+        r"focos_municipios_filtrados_part4.csv",
+        r"focos_municipios_filtrados_part5.csv",
+        r"focos_municipios_filtrados_part6.csv",
+    ]
+    df_inpe = load_inpe(files)
     if not df_inpe.empty:
         figs = graficos_inpe(df_inpe)
         col1, col2 = st.columns(2, gap="large")
@@ -1229,3 +1219,5 @@ with tabs[4]:
         with col2:
             st.subheader("Mapa de Risco de Fogo")
             st.plotly_chart(figs['mapa'], use_container_width=True)
+    else:
+        st.warning("Nenhum dado disponível após filtros.")
