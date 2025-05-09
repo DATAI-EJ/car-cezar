@@ -8,7 +8,6 @@ import unicodedata
 import os
 import numpy as np
 
-
 st.set_page_config(
     page_title="Dashboard de Conflitos Ambientais",
     page_icon="🌳",
@@ -18,56 +17,100 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-  /* Tipografia Times New Roman + tamanhos */
-  body, h1, h2, h3, h4, h5, p {
-    font-family: 'Times New Roman', serif !important;
-  }
-  h1 { font-size:32px !important; font-weight:700 !important; }
-  h2 { font-size:28px !important; font-weight:600 !important; }
+/* ---------- Fundo geral do app ---------- */
+[data-testid="stAppViewContainer"] {
+    background-color: #fefcf9;
+    padding: 2rem;
+    font-family: 'Segoe UI', sans-serif;
+    color: #333333;
+}
 
-  /* Sidebar estilizada */
-  [data-testid="stSidebar"] {
-    width: 250px;
-    background-color: #FDF5E6;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+/* ---------- Sidebar ---------- */
+[data-testid="stSidebar"] {
+    background-color: #f3f0eb;
+    border-right: 2px solid #d8d2ca;
+}
+[data-testid="stSidebar"] > div {
     padding: 1rem;
-  }
-  .sidebar .stContainer {
-    background-color: #FFFFFF;
-    padding: 1rem;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  }
+}
 
-  /* Containers e seções com espaçamento */
-  .stContainer {
-    padding: 1rem 2rem !important;
-  }
-  .spacer {
-    margin-top:20px;
-    margin-bottom:20px;
-  }
+/* ---------- Botões ---------- */
+.stButton > button {
+    background-color: #cbe4d2;
+    color: #2d3a2f;
+    border: 2px solid #a6c4b2;
+    border-radius: 10px;
+    padding: 0.5rem 1rem;
+    font-weight: bold;
+    transition: all 0.3s ease-in-out;
+}
+.stButton > button:hover {
+    background-color: #b4d6c1;
+    color: #1e2a21;
+}
 
-  /* Aba ativa em azul escuro, texto branco */
-  .stTabs [role="tablist"] button[aria-selected="true"] {
-      background-color: #2F5496 !important;
-      color: white       !important;
-  }
-  /* Abas inativas em cinza claro, texto azul */
-  .stTabs [role="tablist"] button[aria-selected="false"] {
-      background-color: #F0F0F5 !important;
-      color: #2F5496     !important;
-  }
-  /* Remover borda padrão e arredondar cantos das abas */
-  .stTabs [role="tablist"] button {
-      border-radius: 8px 8px 0 0 !important;
-      border: none             !important;
-      padding: 0.5rem 1rem      !important;
-  }
+/* ---------- Títulos e textos ---------- */
+h1, h2, h3 {
+    color: #4a4a4a;
+}
+h1 {
+    font-size: 2.2rem;
+    border-bottom: 2px solid #d8d2ca;
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+/* ---------- Tabs ---------- */
+.stTabs [data-baseweb="tab"] {
+    background-color: #ebe7e1;
+    color: #333;
+    border-radius: 0.5rem 0.5rem 0 0;
+    padding: 0.5rem 1rem;
+    margin-right: 0.25rem;
+    font-weight: bold;
+    border: none;
+}
+.stTabs [aria-selected="true"] {
+    background-color: #d6ccc2;
+    color: #111;
+}
+
+/* ---------- Text input ---------- */
+.stTextInput > div > input {
+    background-color: #f9f6f2;
+    border: 1px solid #ccc;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+}
+
+/* ---------- Selectbox ---------- */
+.stSelectbox > div {
+    background-color: #f9f6f2;
+    border-radius: 0.5rem;
+}
+
+/* ---------- Expander ---------- */
+.stExpander > details {
+    background-color: #f2eee9;
+    border: 1px solid #ddd3c7;
+    border-radius: 0.5rem;
+    padding: 0.5rem;
+}
+
+/* ---------- Scrollbar ---------- */
+::-webkit-scrollbar {
+    width: 10px;
+}
+::-webkit-scrollbar-track {
+    background: #f3f0eb;
+}
+::-webkit-scrollbar-thumb {
+    background-color: #b4d6c1;
+    border-radius: 10px;
+    border: 2px solid #f3f0eb;
+}
 </style>
 """, unsafe_allow_html=True)
-
 
 px.set_mapbox_access_token(os.getenv("MAPBOX_TOKEN"))
 
@@ -92,8 +135,6 @@ def _apply_layout(fig: go.Figure, title: str, title_size: int = 16) -> go.Figure
         )
     )
     return fig
-
-
 
 base_layout = go.Layout(
     font=dict(family="Times New Roman", size=12),
@@ -147,7 +188,6 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
     return fig
 
 px.bar = _patched_px_bar
-
 
 @st.cache_data
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True) -> gpd.GeoDataFrame:
@@ -673,21 +713,49 @@ def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
         "vara unica de jacareacanga": "V. Única Jacareacanga"
     }
 
+    # Top 10 Municípios
     df_proc['municipio'] = df_proc['municipio'].apply(clean_text)
     top = df_proc['municipio'].value_counts().head(10).reset_index()
     top.columns = ['Municipio', 'Quantidade']
     top['label'] = top['Municipio'].apply(lambda x: wrap_label(x, 20))
-    fig_mun = px.bar(top, y='label', x='Quantidade', orientation='h', color_discrete_sequence=palette)
+    fig_mun = px.bar(
+        top, y='label', x='Quantidade', orientation='h',
+        color_discrete_sequence=palette
+    )
     fig_mun.update_traces(texttemplate='%{x}', textposition='auto', cliponaxis=False)
-    fig_mun.update_layout(margin=dict(l=150, r=60, t=50, b=bottom_margin), height=500, yaxis=dict(autorange="reversed"))
+    fig_mun.update_layout(
+        margin=dict(l=150, r=60, t=50, b=bottom_margin),
+        height=500,
+        yaxis=dict(autorange="reversed")
+    )
     figs['mun'] = _apply_layout(fig_mun, "Top 10 Municípios com Mais Processos", 16)
 
-    df_proc['ano_mes'] = pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce').dt.to_period('M').dt.to_timestamp()
+    # Evolução Mensal de Processos
+    df_proc['ano_mes'] = (
+        pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce')
+          .dt.to_period('M')
+          .dt.to_timestamp()
+    )
     mensal = df_proc.groupby('ano_mes').size().reset_index(name='Quantidade')
-    fig_temp = px.line(mensal, x='ano_mes', y='Quantidade', markers=True)
-    fig_temp.update_layout(margin=dict(l=80, r=60, t=50, b=bottom_margin), height=400, yaxis=dict(range=[0, mensal['Quantidade'].max() * 1.1]))
+
+    fig_temp = px.line(
+        mensal,
+        x='ano_mes', y='Quantidade',
+        markers=True, text='Quantidade'
+    )
+    fig_temp.update_traces(
+        mode='lines+markers+text',
+        textposition='top center',
+        texttemplate='%{text}'
+    )
+    fig_temp.update_layout(
+        margin=dict(l=80, r=60, t=50, b=bottom_margin),
+        height=400,
+        yaxis=dict(range=[0, mensal['Quantidade'].max() * 1.1])
+    )
     figs['temp'] = _apply_layout(fig_temp, "Evolução Mensal de Processos", 16)
 
+    # Top 10 Classes, Assuntos e Órgãos
     mappings = [
         ('class', 'classe', 'Top 10 Classes Processuais', mapa_classes),
         ('ass', 'assuntos', 'Top 10 Assuntos', mapa_assuntos),
@@ -696,20 +764,37 @@ def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
 
     for key, col, title, mapa in mappings:
         df_proc[col] = df_proc[col].apply(clean_text)
-        df = df_proc[col].replace(mapa).value_counts().head(10).reset_index()
+        df = (
+            df_proc[col]
+            .replace(mapa)
+            .value_counts()
+            .head(10)
+            .reset_index()
+        )
         df.columns = [col, 'Quantidade']
         df['label'] = df[col].apply(lambda x: wrap_label(x, 30))
-        fig = px.bar(df, y='label', x='Quantidade', orientation='h', color_discrete_sequence=palette)
+        fig = px.bar(
+            df, y='label', x='Quantidade', orientation='h',
+            color_discrete_sequence=palette
+        )
         fig.update_traces(texttemplate='%{x}', textposition='auto', cliponaxis=False)
-        fig.update_layout(margin=dict(l=180, r=60, t=50, b=bottom_margin), height=500, yaxis=dict(autorange="reversed"))
+        fig.update_layout(
+            margin=dict(l=180, r=60, t=50, b=bottom_margin),
+            height=500,
+            yaxis=dict(autorange="reversed")
+        )
         figs[key] = _apply_layout(fig, title, 16)
 
     return figs
 
+def corrige_coord(x):
+    if pd.isna(x):
+        return np.nan
+    return x / 1e5 if abs(x) > 180 else x
 
 @st.cache_data
 def carregar_dados_fogo(
-    caminho_csv: str,
+    caminho_csv: str = r"Areas_de_interesse_ordenado.csv",
     sep: str = ';',
     encoding: str = 'latin1'
 ) -> pd.DataFrame:
@@ -717,17 +802,37 @@ def carregar_dados_fogo(
         df = pd.read_csv(caminho_csv, sep=sep, encoding=encoding)
     except UnicodeDecodeError:
         df = pd.read_csv(caminho_csv, sep=sep, encoding='utf-8', errors='replace')
-
     df['DataHora'] = pd.to_datetime(df['DataHora'], dayfirst=True, errors='coerce')
     df = df.dropna(subset=['DataHora'])
     df['date'] = df['DataHora'].dt.date
-    df['hour'] = df['DataHora'].dt.hour
-    df['month'] = df['DataHora'].dt.to_period('M').dt.to_timestamp()
+    df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce').map(lambda x: x/1e5 if abs(x)>180 else x)
+    df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce').map(lambda x: x/1e5 if abs(x)>180 else x)
+    for col in ['DiaSemChuva','Precipitacao','RiscoFogo','FRP']:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df.loc[df[col]==-999, col] = np.nan
+    df = df.dropna(subset=['Latitude','Longitude'])
+    minx, miny, maxx, maxy = gdf_cnuc.total_bounds
+    df = df[(df.Latitude >= miny) & (df.Latitude <= maxy) & (df.Longitude >= minx) & (df.Longitude <= maxx)]
     return df
 
-def criar_figuras_fogo(df: pd.DataFrame) -> dict[str, go.Figure]:
-    figs = {}
-    df = df.dropna(subset=['RiscoFogo','Precipitacao','date','Municipio']).assign(date=lambda d: pd.to_datetime(d['date'], errors='coerce'))
+def criar_figuras_fogo(df: pd.DataFrame, ano: int | None = None) -> dict[str, go.Figure]:
+    """
+    Cria visualizações para análise de focos de calor.
+    
+    Args:
+        df: DataFrame com dados de focos de calor
+        ano: Ano para filtrar os dados (opcional)
+        
+    Returns:
+        Dicionário com figuras Plotly
+    """
+    if ano is not None:
+        df = df[df['date'].dt.year == ano]
+    df = (
+        df
+        .dropna(subset=['date','RiscoFogo','Precipitacao','Municipio','Latitude','Longitude'])
+        .assign(date=lambda d: pd.to_datetime(d['date'], errors='coerce'))
+    )
     cores = px.defaults.color_discrete_sequence
 
     daily = df.groupby(df['date'].dt.date).size().rename('count')
@@ -744,53 +849,68 @@ def criar_figuras_fogo(df: pd.DataFrame) -> dict[str, go.Figure]:
     ts_ann = pd.concat([annual, rolling_annual], axis=1).reset_index()
     ts_ann.columns = ['date','count','m2']
 
-    max_date = ts_df['date'].max()
-
     fig_ts = go.Figure()
-    fig_ts.add_trace(go.Scatter(x=ts_df['date'], y=ts_df['count'], mode='markers', name='Diário (pontos)', marker=dict(size=3, color=cores[0], opacity=0.4), visible='legendonly', hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Focos: %{y}<extra></extra>'))
-    fig_ts.add_trace(go.Scatter(x=ts_df['date'], y=ts_df['m7'], mode='lines', name='Diário (média 7d)', line=dict(color=cores[1], width=3), visible=True, hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Média7d: %{y:.1f}<extra></extra>'))
-    fig_ts.add_trace(go.Scatter(x=ts_month['date'], y=ts_month['count'], mode='markers+lines', name='Mensal (totais)', marker=dict(size=6, color=cores[2], opacity=0.6), line=dict(width=1, color=cores[2]), visible=False, hovertemplate='<b>%{x|%Y-%m}</b><br>Focos: %{y}<extra></extra>'))
-    fig_ts.add_trace(go.Scatter(x=ts_month['date'], y=ts_month['m3'], mode='lines', name='Mensal (média 3m)', line=dict(color=cores[3], width=3, dash='dash'), visible=False, hovertemplate='<b>%{x|%Y-%m}</b><br>Média3m: %{y:.1f}<extra></extra>'))
-    fig_ts.add_trace(go.Scatter(x=ts_ann['date'], y=ts_ann['count'], mode='markers+lines', name='Anual (totais)', marker=dict(size=8, color=cores[4], opacity=0.6), line=dict(width=1, color=cores[4]), visible=False, hovertemplate='<b>%{x|%Y}</b><br>Focos: %{y}<extra></extra>'))
-    fig_ts.add_trace(go.Scatter(x=ts_ann['date'], y=ts_ann['m2'], mode='lines', name='Anual (média 2a)', line=dict(color=cores[5] if len(cores)>5 else cores[0], width=3, dash='dot'), visible=False, hovertemplate='<b>%{x|%Y}</b><br>Média2a: %{y:.1f}<extra></extra>'))
+    fig_ts.add_trace(go.Scatter(
+        x=ts_df['date'], y=ts_df['count'],
+        mode='lines+markers+text',
+        line=dict(shape='spline', width=2, smoothing=1.2, color=cores[0]),
+        marker=dict(size=6, color=cores[1], line=dict(width=1, color='black')),
+        text=ts_df['count'], textposition='top center', texttemplate='%{text}',
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Focos: %{y}<extra></extra>'
+    ))
+    fig_ts.add_trace(go.Scatter(
+        x=ts_df['date'], y=ts_df['m7'],
+        mode='lines', line=dict(color=cores[2], width=3),
+        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Média7d: %{y:.1f}<extra></extra>'
+    ))
     fig_ts.update_layout(
-        updatemenus=[dict(type='buttons', direction='right', x=0.0, y=1.15, pad=dict(r=10, t=10), bgcolor='white', bordercolor='lightgray', borderwidth=1, font=dict(size=12, color='black'), active=0, buttons=[
-            dict(label='Diário', method='update', args=[{'visible':[True,True,False,False,False,False]}]),
-            dict(label='Mensal', method='update', args=[{'visible':[False,False,True,True,False,False]}]),
-            dict(label='Anual', method='update', args=[{'visible':[False,False,False,False,True,True]}])
-        ])],
-        xaxis=dict(type='date', range=[max_date - pd.Timedelta(days=365*5), max_date], tickformat='%Y', nticks=8, showgrid=False, title='Data'),
-        yaxis=dict(title='Número de Focos'),
-        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+        xaxis=dict(
+            type='date',
+            range=[ts_df['date'].min(), ts_df['date'].max()],
+            rangeselector=dict(
+                buttons=[
+                    dict(count=1, label='1m', step='month', stepmode='backward'),
+                    dict(count=3, label='3m', step='month', stepmode='backward'),
+                    dict(count=6, label='6m', step='month', stepmode='backward'),
+                    dict(count=1, label='YTD', step='year', stepmode='todate'),
+                    dict(count=1, label='1y', step='year', stepmode='backward'),
+                    dict(step='all', label='All')
+                ]
+            ),
+            showgrid=False
+        ),
+        yaxis=dict(title='Número de Focos', gridcolor='lightgrey'),
         margin=dict(l=40, r=20, t=60, b=40),
-        width=700, height=400, font=dict(size=12),
-        title=dict(text='Focos de Calor', x=0.5, xanchor='center', font=dict(size=18))
+        height=450,
+        legend=dict(orientation='h', y=1.02, x=1)
     )
-    figs['ts'] = _apply_layout(fig_ts, title='Focos de Calor', title_size=18)
+    figs = {'ts': fig_ts}
 
     top = df['Municipio'].value_counts().head(10).rename_axis('Município').reset_index(name='Focos')
-    top['Mun_wrap'] = top['Município'].apply(lambda x: wrap_label(x, 25))
-    top['Categoria'] = top['Focos'].rank(method='first', ascending=False).apply(lambda r: 'Top 3' if r <= 3 else 'Outros')
-    fig_top = px.bar(top.sort_values('Focos', ascending=True), x='Focos', y='Mun_wrap', orientation='h', color='Categoria', text='Focos', color_discrete_map={'Top 3': cores[2], 'Outros': cores[3]}, labels={'Focos':'Nº de Focos','Mun_wrap':'Município'}, template=None)
-    fig_top.update_traces(texttemplate='%{text:.0f}', textposition='outside', hovertemplate='<b>%{y}</b><br>Focos: %{x}<extra></extra>')
-    fig_top.update_layout(yaxis=dict(title=''), xaxis=dict(title='Número de Focos'), legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1), margin=dict(l=150, r=20, t=60, b=40), height=400)
-    figs['top_municipios'] = _apply_layout(fig_top, title='Top 10 Municípios por Focos de Calor', title_size=18)
+    top['Mun_wrap'] = top['Município'].apply(lambda x: x)
+    top['Categoria'] = top['Focos'].rank(method='first', ascending=False).apply(lambda r: 'Top 3' if r<=3 else 'Outros')
+    fig_top = px.bar(
+        top.sort_values('Focos', ascending=True),
+        x='Focos', y='Mun_wrap', orientation='h', color='Categoria', text='Focos',
+        color_discrete_map={'Top 3': cores[2], 'Outros': cores[3]}
+    )
+    fig_top.update_traces(texttemplate='%{text}', textposition='outside')
+    fig_top.update_layout(margin=dict(l=150, r=20, t=60, b=40), height=400)
+    figs['top_municipios'] = fig_top
 
-    df_r = df.query('RiscoFogo >= 0 and RiscoFogo <= 100')
-    fig_violin = px.violin(df_r, y='RiscoFogo', box=True, points='all', orientation='h', labels={'RiscoFogo':'Risco de Fogo (%)'}, template=None)
-    fig_violin.update_traces(meanline_visible=True, hovertemplate='<b>Risco:</b> %{y:.1f}%<extra></extra>')
-    fig_violin.update_layout(xaxis=dict(title='Risco de Fogo (%)'), yaxis=dict(title=''), margin=dict(l=80, r=20, t=60, b=40))
-    figs['hist_risco'] = _apply_layout(fig_violin, title='Distribuição de Risco de Fogo (%)', title_size=18)
-
-    df_map = df.dropna(subset=['Latitude','Longitude'])
+    df_map = df[(df['Latitude']>-90)&(df['Latitude']<90)&(df['Longitude']>-180)&(df['Longitude']<180)]
     p99 = df_map['Precipitacao'].quantile(0.99)
     r99 = df_map['RiscoFogo'].quantile(0.99)
     df_s = df_map[(df_map['Precipitacao']>=0)&(df_map['Precipitacao']<=p99)&(df_map['RiscoFogo']>=0)&(df_map['RiscoFogo']<=r99)]
-    fig_map = px.scatter_mapbox(df_s, lat='Latitude', lon='Longitude', hover_name='Municipio', hover_data={'date':True,'RiscoFogo':True}, color_continuous_scale=px.colors.cyclical.IceFire, size_max=6, zoom=5, height=400, template=None)
-    centro = {'lat': df_s['Latitude'].mean(), 'lon': df_s['Longitude'].mean()}
-    fig_map.update_layout(mapbox=dict(style='open-street-map', center=centro, zoom=5), margin=dict(l=20, r=20, t=60, b=20), showlegend=False)
-    fig_map.update_traces(marker=dict(color=cores[3]), marker_showscale=False)
-    figs['scatter_prec_risco'] = _apply_layout(fig_map, title='Mapa de Focos de Calor', title_size=18)
+    fig_map = px.scatter_mapbox(
+        df_s, lat='Latitude', lon='Longitude', color='RiscoFogo',
+        color_continuous_scale='YlOrRd', size=None,
+        hover_name='Municipio', hover_data={'date':True,'RiscoFogo':True},
+        zoom=5, height=400, template=None
+    )
+    fig_map.update_traces(marker=dict(size=8, opacity=0.7), marker_showscale=True)
+    fig_map.update_layout(mapbox=dict(style='open-street-map'), margin=dict(l=20, r=20, t=60, b=20), showlegend=False)
+    figs['scatter_prec_risco'] = fig_map
 
     return figs
 
@@ -813,6 +933,101 @@ def app_fogo(caminho_csv: str, sep: str = ';', encoding: str = 'latin1'):
         st.plotly_chart(figs['scatter_prec_risco'], use_container_width=True)
     else:
         st.plotly_chart(figs['top_municipios'], use_container_width=True)
+
+@st.cache_data(show_spinner=False)
+def load_inpe(filepath: str, chunksize: int = 100_000) -> pd.DataFrame:
+    cols = ['RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
+    with open(filepath, 'r', encoding='utf-8') as f:
+        sample = f.read(2048)
+    delim = ',' if sample.count(',') > sample.count(';') else ';'
+    dfs = []
+    total = 0
+    progress = st.progress(0)
+    for i, chunk in enumerate(pd.read_csv(
+        filepath,
+        sep=delim,
+        usecols=cols,
+        iterator=True,
+        chunksize=chunksize,
+        encoding='utf-8'
+    )):
+        chunk = chunk.dropna()
+        chunk = chunk[chunk['RiscoFogo'] > 0]
+        dfs.append(chunk)
+        total += len(chunk)
+        progress.progress(min((i+1) * chunksize / (10 * chunksize), 1.0))
+    df = pd.concat(dfs, ignore_index=True)
+    return df
+    
+def graficos_inpe(df: pd.DataFrame) -> dict:
+    figs = {}
+    # Top 10 municípios por risco de fogo
+    top_risco = df.groupby('mun_corrigido')['RiscoFogo'].mean().nlargest(10).sort_values()
+    fig_risco = go.Figure(go.Bar(
+        y=top_risco.index,
+        x=top_risco.values,
+        orientation='h',
+        marker_color='#AECBFA',
+        text=top_risco.values,
+        texttemplate='<b>%{text:.2f}</b>', 
+        textposition='outside',             
+    ))
+    fig_risco.update_layout(
+        title='Top Municípios - Risco de Fogo',
+        xaxis_title='Risco Médio',
+        height=400,
+        margin=dict(l=60, r=80, t=50, b=40) 
+    )
+    figs['top_risco'] = fig_risco
+
+    # Top 10 municípios por precipitação
+    top_precip = df.groupby('mun_corrigido')['Precipitacao'].mean().nlargest(10).sort_values()
+    fig_precip = go.Figure(go.Bar(
+        y=top_precip.index,
+        x=top_precip.values,
+        orientation='h',
+        marker_color='#FFE0B2',
+        text=top_precip.values,
+        texttemplate='<b>%{text:.1f} mm</b>', 
+        textposition='outside',
+    ))
+    fig_precip.update_layout(
+        title='Top Municípios - Precipitação',
+        xaxis_title='Precipitação Média (mm)',
+        height=400,
+        margin=dict(l=60, r=80, t=50, b=40)
+    )
+    figs['top_precip'] = fig_precip
+    # Mapa de dispersão
+    max_points = 50_000
+    df_plot = df.sample(max_points, random_state=1) if len(df) > max_points else df
+
+    lat_min, lat_max = df_plot['Latitude'].min(), df_plot['Latitude'].max()
+    lon_min, lon_max = df_plot['Longitude'].min(), df_plot['Longitude'].max()
+    centro = {'lat': (lat_min + lat_max) / 2, 'lon': (lon_min + lon_max) / 2}
+    span = max(lat_max - lat_min, lon_max - lon_min)
+    zoom = 10 if span < 1 else 8 if span < 5 else 6 if span < 10 else 4
+
+    fig_map = px.scatter_mapbox(
+        df_plot,
+        lat='Latitude',
+        lon='Longitude',
+        color='RiscoFogo',
+        size='Precipitacao',
+        hover_name='mun_corrigido',
+        size_max=15,
+        color_continuous_scale='orrd',
+        zoom=zoom,
+        center=centro
+    )
+    fig_map.update_layout(
+        mapbox=dict(style='open-street-map'),
+        margin=dict(l=0, r=0, t=30, b=0),
+        coloraxis_showscale=False
+    )
+    figs['mapa'] = fig_map
+
+    return figs
 
 gdf_cnuc = carregar_shapefile(
     r"cnuc.shp"
@@ -878,7 +1093,8 @@ perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar
     invadindo_opcao
 )
 
-tabs = st.tabs(["Sobreposições", "Queimadas", "Famílias", "Justiça"])
+
+tabs = st.tabs(["Sobreposições", "Queimadas", "Famílias", "Justiça", "INPE"])
 
 with tabs[0]:
     st.header("Sobreposições")
@@ -929,63 +1145,87 @@ with tabs[0]:
 
 st.markdown('<div class="spacer"></div>', unsafe_allow_html=True)
 
+figs_fogo = criar_figuras_fogo(df_fogo)
+
 with tabs[1]:
-    st.header("Focos de Calor")
+    st.header('Focos de Calor')
 
-    col1, col2 = st.columns(2, gap="large")
+    col_filtros, _ = st.columns([1.5, 3])
+    with col_filtros:
+        st.markdown("### 🔎 Filtro por Ano")
+        anos = pd.to_datetime(df_fogo['date'], errors='coerce').dropna().dt.year.unique().tolist()
+        anos.sort()
+        ano_sel = st.selectbox('Selecione o ano:', [None] + anos, format_func=lambda x: 'Todos' if x is None else str(x))
+
+    df_fogo['date'] = pd.to_datetime(df_fogo['date'], errors='coerce')
+    figs_fogo_ano = criar_figuras_fogo(df_fogo, ano=ano_sel)
+
+    st.subheader(f"Evolução Diária — {ano_sel or 'Todos os anos'}")
+    st.plotly_chart(figs_fogo_ano['ts'], use_container_width=True, height=500)
+
+    col1, col2 = st.columns(2, gap='large')
     with col1:
-        st.subheader("Temporal Diário")
-        st.plotly_chart(
-            figs_fogo['ts'],
-            use_container_width=True,
-            key="fogo_ts"
-        )
-
+        st.subheader('Top Municípios')
+        st.caption("Novo progresso tem apenas um registro, falta de dados.")        
+        st.plotly_chart(figs_fogo_ano['top_municipios'], use_container_width=True, height=400)
     with col2:
-        st.subheader("Top 10 Municípios")
-        st.plotly_chart(
-            figs_fogo['top_municipios'],
-            use_container_width=True,
-            key="fogo_top10"
-        )
+        st.subheader('Mapa de Focos')
+        st.plotly_chart(figs_fogo_ano['scatter_prec_risco'], use_container_width=True, height=400)
 
 with tabs[2]:
     st.header("Impacto Social")
-    with st.container():
-        col_fam, col_conf = st.columns(2, gap="large")
-        with col_fam:
-            st.subheader("Famílias Afetadas")
-            st.plotly_chart(
-                fig_familias(df_confmun),
-                use_container_width=True,
-                height=400,
-                key="familias"
-            )
-        with col_conf:
-            st.subheader("Conflitos Registrados")
-            st.plotly_chart(
-                fig_conflitos(df_confmun),
-                use_container_width=True,
-                height=400,
-                key="conflitos"
-            )
+    col_fam, col_conf = st.columns(2, gap="large")
+    with col_fam:
+        st.subheader("Famílias Afetadas")
+        st.plotly_chart(fig_familias(df_confmun), use_container_width=True, height=400, key="familias")
+    with col_conf:
+        st.subheader("Conflitos Registrados")
+        st.plotly_chart(fig_conflitos(df_confmun), use_container_width=True, height=400, key="conflitos")
 
 with tabs[3]:
     st.header("Processos Judiciais")
     figs_j = fig_justica(df_proc)
-    key_map = {"Municípios":"mun","Temporal":"temp","Classes":"class","Assuntos":"ass","Órgãos":"org"}
-    linhas = [("Municípios","Temporal","Classes"),("Assuntos","Órgãos","")]
+    key_map = {
+        "Municípios":"mun",
+        "Temporal":"temp",
+        "Classes":"class",
+        "Assuntos":"ass",
+        "Órgãos":"org"
+    }
 
-    for i, linha in enumerate(linhas):
-        with st.container():
-            cols = st.columns(3, gap="large")
-            for j, key in enumerate(linha):
-                if not key: continue
-                chart_key = key_map[key]
-                cols[j].subheader(key)
-                cols[j].plotly_chart(
-                    figs_j[chart_key],
-                    use_container_width=True,
-                    height=300,
-                    key=f"jud_{chart_key}_{i}"
-                )
+    barras = ["Municípios","Classes","Assuntos","Órgãos"]
+    for i in range(0, len(barras), 2):
+        cols = st.columns(2, gap="large")
+        for col, key in zip(cols, barras[i:i+2]):
+            chart_key = key_map[key]
+            col.subheader(key)
+            col.plotly_chart(
+                figs_j[chart_key],
+                use_container_width=True,
+                height=300,
+                key=f"jud_{chart_key}_{i//2}"
+            )
+
+    # ── gráfico de linha
+    st.subheader("Evolução Mensal de Processos")
+    st.plotly_chart(
+        figs_j[key_map["Temporal"]],
+        use_container_width=True,
+        height=500,
+        key="jud_temp_full"
+    )
+
+with tabs[4]:
+    st.header("Focos de Calor")
+    inpe_path = r"focos_municipios_filtrados.csv"
+    df_inpe = load_inpe(inpe_path)
+    if not df_inpe.empty:
+        figs = graficos_inpe(df_inpe)
+        col1, col2 = st.columns(2, gap="large")
+        with col1:
+            st.subheader("Risco e Precipitação")
+            st.plotly_chart(figs['top_risco'], use_container_width=True)
+            st.plotly_chart(figs['top_precip'], use_container_width=True)
+        with col2:
+            st.subheader("Mapa de Risco de Fogo")
+            st.plotly_chart(figs['mapa'], use_container_width=True)
