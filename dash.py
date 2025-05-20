@@ -327,7 +327,7 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             borderwidth=1,
             font=dict(size=10)
         ),
-        height=700
+        height=550
     )
     return fig
 
@@ -554,6 +554,41 @@ def fig_contagens_uc(gdf_cnuc: gpd.GeoDataFrame) -> go.Figure:
     
     return _apply_layout(fig, title="Contagens por UC", title_size=16)
 
+def fig_car_por_uc_donut(gdf_cnuc_ha: gpd.GeoDataFrame, nome_uc: str, modo_valor: str = "percent") -> go.Figure:
+    if nome_uc == "Todas":
+        area_total = gdf_cnuc_ha["area_ha"].sum()
+        area_car = gdf_cnuc_ha["sigef_ha"].sum()
+    else:
+        row = gdf_cnuc_ha[gdf_cnuc_ha["nome_uc"] == nome_uc]
+        if row.empty:
+            raise ValueError(f"Unidade de conservação '{nome_uc}' não encontrada.")
+        area_total = row["area_ha"].values[0]
+        area_car = row["sigef_ha"].values[0]
+    total_chart = max(area_total, area_car)
+    restante_chart = total_chart - area_car
+    percentual = (area_car / area_total) * 100 if area_total else 0
+    if modo_valor == "percent":
+        textinfo = "label+percent"
+        center_text = f"{percentual:.1f}%"
+    else:
+        textinfo = "label+value"
+        center_text = f"{area_car:,.0f} ha"
+    fig = go.Figure(data=[go.Pie(
+        labels=["Área CAR", "Área restante"],
+        values=[area_car, restante_chart],
+        hole=0.6,
+        marker_colors=["#2ca02c", "#d9d9d9"],
+        textinfo=textinfo,
+        hoverinfo="label+value+percent"
+    )])
+    fig.update_layout(
+        title_text=f"Ocupação do CAR em: {nome_uc}",
+        annotations=[dict(text=center_text, x=0.5, y=0.5, font_size=22, showarrow=False)],
+        height=400
+    )
+    return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
+
+
 def fig_ocupacoes(df_csv: pd.DataFrame) -> go.Figure:
     df = (
         df_csv
@@ -730,7 +765,7 @@ def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
     )
     figs['mun'] = _apply_layout(fig_mun, "Top 10 Municípios com Mais Processos", 16)
 
-    # Evolução Mensal de Processos
+    # Evolução Mensal de Processos — com bolinha e valor destacado
     df_proc['ano_mes'] = (
         pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce')
           .dt.to_period('M')
@@ -743,6 +778,7 @@ def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
         x='ano_mes', y='Quantidade',
         markers=True, text='Quantidade'
     )
+    # faz aparecer o texto acima de cada marcador
     fig_temp.update_traces(
         mode='lines+markers+text',
         textposition='top center',
@@ -792,141 +828,9 @@ def corrige_coord(x):
         return np.nan
     return x / 1e5 if abs(x) > 180 else x
 
-@st.cache_data
-def carregar_dados_fogo(
-    caminho_csv: str = r"Areas_de_interesse_ordenado.csv",
-    sep: str = ';',
-    encoding: str = 'latin1'
-) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(caminho_csv, sep=sep, encoding=encoding)
-    except UnicodeDecodeError:
-        df = pd.read_csv(caminho_csv, sep=sep, encoding='utf-8', errors='replace')
-    df['DataHora'] = pd.to_datetime(df['DataHora'], dayfirst=True, errors='coerce')
-    df = df.dropna(subset=['DataHora'])
-    df['date'] = df['DataHora'].dt.date
-    df['Latitude'] = pd.to_numeric(df['Latitude'], errors='coerce').map(lambda x: x/1e5 if abs(x)>180 else x)
-    df['Longitude'] = pd.to_numeric(df['Longitude'], errors='coerce').map(lambda x: x/1e5 if abs(x)>180 else x)
-    for col in ['DiaSemChuva','Precipitacao','RiscoFogo','FRP']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-        df.loc[df[col]==-999, col] = np.nan
-    df = df.dropna(subset=['Latitude','Longitude'])
-    minx, miny, maxx, maxy = gdf_cnuc.total_bounds
-    df = df[(df.Latitude >= miny) & (df.Latitude <= maxy) & (df.Longitude >= minx) & (df.Longitude <= maxx)]
-    return df
-
-def criar_figuras_fogo(df: pd.DataFrame, ano: int | None = None) -> dict[str, go.Figure]:
-    if ano is not None:
-        df = df[df['date'].dt.year == ano]
-    df = (
-        df
-        .dropna(subset=['date','RiscoFogo','Precipitacao','Municipio','Latitude','Longitude'])
-        .assign(date=lambda d: pd.to_datetime(d['date'], errors='coerce'))
-    )
-    cores = px.defaults.color_discrete_sequence
-
-    daily = df.groupby(df['date'].dt.date).size().rename('count')
-    rolling = daily.rolling(window=7, min_periods=1).mean().rename('m7')
-    ts_df = pd.concat([daily, rolling], axis=1).reset_index().rename(columns={'index':'date'})
-
-    monthly = df.set_index('date').resample('M').size().rename('count')
-    rolling_monthly = monthly.rolling(window=3, min_periods=1).mean().rename('m3')
-    ts_month = pd.concat([monthly, rolling_monthly], axis=1).reset_index()
-    ts_month.columns = ['date','count','m3']
-
-    annual = df.set_index('date').resample('Y').size().rename('count')
-    rolling_annual = annual.rolling(window=2, min_periods=1).mean().rename('m2')
-    ts_ann = pd.concat([annual, rolling_annual], axis=1).reset_index()
-    ts_ann.columns = ['date','count','m2']
-
-    fig_ts = go.Figure()
-    fig_ts.add_trace(go.Scatter(
-        x=ts_df['date'], y=ts_df['count'],
-        mode='lines+markers+text',
-        line=dict(shape='spline', width=2, smoothing=1.2, color=cores[0]),
-        marker=dict(size=6, color=cores[1], line=dict(width=1, color='black')),
-        text=ts_df['count'], textposition='top center', texttemplate='%{text}',
-        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Focos: %{y}<extra></extra>'
-    ))
-    fig_ts.add_trace(go.Scatter(
-        x=ts_df['date'], y=ts_df['m7'],
-        mode='lines', line=dict(color=cores[2], width=3),
-        hovertemplate='<b>%{x|%Y-%m-%d}</b><br>Média7d: %{y:.1f}<extra></extra>'
-    ))
-    fig_ts.update_layout(
-        xaxis=dict(
-            type='date',
-            range=[ts_df['date'].min(), ts_df['date'].max()],
-            rangeselector=dict(
-                buttons=[
-                    dict(count=1, label='1m', step='month', stepmode='backward'),
-                    dict(count=3, label='3m', step='month', stepmode='backward'),
-                    dict(count=6, label='6m', step='month', stepmode='backward'),
-                    dict(count=1, label='YTD', step='year', stepmode='todate'),
-                    dict(count=1, label='1y', step='year', stepmode='backward'),
-                    dict(step='all', label='All')
-                ]
-            ),
-            showgrid=False
-        ),
-        yaxis=dict(title='Número de Focos', gridcolor='lightgrey'),
-        margin=dict(l=40, r=20, t=60, b=40),
-        height=450,
-        legend=dict(orientation='h', y=1.02, x=1)
-    )
-    figs = {'ts': fig_ts}
-
-    top = df['Municipio'].value_counts().head(10).rename_axis('Município').reset_index(name='Focos')
-    top['Mun_wrap'] = top['Município'].apply(lambda x: x)
-    top['Categoria'] = top['Focos'].rank(method='first', ascending=False).apply(lambda r: 'Top 3' if r<=3 else 'Outros')
-    fig_top = px.bar(
-        top.sort_values('Focos', ascending=True),
-        x='Focos', y='Mun_wrap', orientation='h', color='Categoria', text='Focos',
-        color_discrete_map={'Top 3': cores[2], 'Outros': cores[3]}
-    )
-    fig_top.update_traces(texttemplate='%{text}', textposition='outside')
-    fig_top.update_layout(margin=dict(l=150, r=20, t=60, b=40), height=400)
-    figs['top_municipios'] = fig_top
-
-    df_map = df[(df['Latitude']>-90)&(df['Latitude']<90)&(df['Longitude']>-180)&(df['Longitude']<180)]
-    p99 = df_map['Precipitacao'].quantile(0.99)
-    r99 = df_map['RiscoFogo'].quantile(0.99)
-    df_s = df_map[(df_map['Precipitacao']>=0)&(df_map['Precipitacao']<=p99)&(df_map['RiscoFogo']>=0)&(df_map['RiscoFogo']<=r99)]
-    fig_map = px.scatter_mapbox(
-        df_s, lat='Latitude', lon='Longitude', color='RiscoFogo',
-        color_continuous_scale='YlOrRd', size=None,
-        hover_name='Municipio', hover_data={'date':True,'RiscoFogo':True},
-        zoom=5, height=400, template=None
-    )
-    fig_map.update_traces(marker=dict(size=8, opacity=0.7), marker_showscale=True)
-    fig_map.update_layout(mapbox=dict(style='open-street-map'), margin=dict(l=20, r=20, t=60, b=20), showlegend=False)
-    figs['scatter_prec_risco'] = fig_map
-
-    return figs
-
-def app_fogo(caminho_csv: str, sep: str = ';', encoding: str = 'latin1'):
-    df_fogo = carregar_dados_fogo(caminho_csv, sep=sep, encoding=encoding)
-    figs = criar_figuras_fogo(df_fogo)
-    
-    st.sidebar.header("Focos de Calor")
-    opcao = st.sidebar.selectbox(
-        "Selecione um gráfico:",
-        ["Série Temporal", "Histograma de Risco", "Precip x Risco", "Top Municípios"]
-    )
-    st.header("Análise de Focos de Calor")
-
-    if opcao == "Série Temporal":
-        st.plotly_chart(figs['ts'], use_container_width=True)
-    elif opcao == "Histograma de Risco":
-        st.plotly_chart(figs['hist_risco'], use_container_width=True)
-    elif opcao == "Precip x Risco":
-        st.plotly_chart(figs['scatter_prec_risco'], use_container_width=True)
-    else:
-        st.plotly_chart(figs['top_municipios'], use_container_width=True)
-
 @st.cache_data(show_spinner=False)
 def load_inpe(filepaths: list[str], chunksize: int = 100_000) -> pd.DataFrame:
-    cols = ['RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
+    cols = ['DataHora', 'RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
     dfs = []
     total_chunks = 0
     progress = st.progress(0)
@@ -940,39 +844,72 @@ def load_inpe(filepaths: list[str], chunksize: int = 100_000) -> pd.DataFrame:
             dfs.append(chunk)
             total_chunks += 1
             progress.progress(min(total_chunks / (20 * len(filepaths)), 1.0))
-    return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
+    df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
+    df['DataHora'] = pd.to_datetime(df['DataHora'])
+    return df
 
-def graficos_inpe(df: pd.DataFrame) -> dict:
-    figs = {}
-    # Top 10 municípios por risco de fogo
+def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
+    df = df[df['DataHora'].dt.year == ano]
+    df_indexed = df.set_index('DataHora')
+    df_indexed = df_indexed[df_indexed['RiscoFogo'].between(0, 1)]
+    df_indexed['RiscoFogo'] = df_indexed['RiscoFogo'].fillna(method='ffill')
+    
+    monthly = df_indexed.resample('M')['RiscoFogo'].mean().reset_index()
+
+    fig_temp = go.Figure()
+
+    # Gráfico mensal
+    fig_temp.add_trace(go.Scatter(
+        x=monthly['DataHora'].dt.to_period('M').astype(str),
+        y=monthly['RiscoFogo'],
+        name='Risco de Fogo Mensal',
+        mode='lines+markers+text',
+        marker=dict(
+            size=8,
+            color='#FF4136',
+            line=dict(width=1, color='#444')
+        ),
+        line=dict(width=2, color='#FF4136'),
+        text=[f'{v:.2f}' for v in monthly['RiscoFogo']],
+        textposition='top center'
+    ))
+
+    fig_temp.update_layout(
+        title='Evolução Mensal do Risco de Fogo',
+        xaxis_title='Mês',
+        yaxis_title='Risco Médio',
+        height=400,
+        margin=dict(l=60, r=80, t=80, b=40),
+        showlegend=True,
+        hovermode='x unified'
+    )
+    
     top_risco = df.groupby('mun_corrigido')['RiscoFogo'].mean().nlargest(10).sort_values()
     fig_risco = go.Figure(go.Bar(
         y=top_risco.index,
         x=top_risco.values,
         orientation='h',
-        marker_color='#AECBFA',
+        marker_color='#FF8C7A',
         text=top_risco.values,
-        texttemplate='<b>%{text:.2f}</b>', 
-        textposition='outside',             
+        texttemplate='<b>%{text:.2f}</b>',
+        textposition='outside'
     ))
     fig_risco.update_layout(
         title='Top Municípios - Risco de Fogo',
         xaxis_title='Risco Médio',
         height=400,
-        margin=dict(l=60, r=80, t=50, b=40) 
+        margin=dict(l=60, r=80, t=50, b=40)
     )
-    figs['top_risco'] = fig_risco
-
-    # Top 10 municípios por precipitação
+    
     top_precip = df.groupby('mun_corrigido')['Precipitacao'].mean().nlargest(10).sort_values()
     fig_precip = go.Figure(go.Bar(
         y=top_precip.index,
         x=top_precip.values,
         orientation='h',
-        marker_color='#FFE0B2',
+        marker_color='#B3D9FF',
         text=top_precip.values,
-        texttemplate='<b>%{text:.1f} mm</b>', 
-        textposition='outside',
+        texttemplate='<b>%{text:.1f} mm</b>',
+        textposition='outside'
     ))
     fig_precip.update_layout(
         title='Top Municípios - Precipitação',
@@ -980,18 +917,14 @@ def graficos_inpe(df: pd.DataFrame) -> dict:
         height=400,
         margin=dict(l=60, r=80, t=50, b=40)
     )
-    figs['top_precip'] = fig_precip
-
-    # Mapa de dispersão (sem alterações)
-    max_points = 50_000
-    df_plot = df.sample(max_points, random_state=1) if len(df) > max_points else df
-
+    
+    df_plot = df.sample(50000, random_state=1) if len(df) > 50000 else df
     lat_min, lat_max = df_plot['Latitude'].min(), df_plot['Latitude'].max()
     lon_min, lon_max = df_plot['Longitude'].min(), df_plot['Longitude'].max()
     centro = {'lat': (lat_min + lat_max) / 2, 'lon': (lon_min + lon_max) / 2}
     span = max(lat_max - lat_min, lon_max - lon_min)
     zoom = 10 if span < 1 else 8 if span < 5 else 6 if span < 10 else 4
-
+    
     fig_map = px.scatter_mapbox(
         df_plot,
         lat='Latitude',
@@ -1000,18 +933,19 @@ def graficos_inpe(df: pd.DataFrame) -> dict:
         size='Precipitacao',
         hover_name='mun_corrigido',
         size_max=15,
-        color_continuous_scale='orrd',
+        color_continuous_scale=['#FFE5E5', '#FF4136'],
         zoom=zoom,
         center=centro
     )
     fig_map.update_layout(
         mapbox=dict(style='open-street-map'),
         margin=dict(l=0, r=0, t=30, b=0),
-        coloraxis_showscale=False
+        coloraxis_showscale=True,
+        coloraxis_colorbar=dict(title='Risco de Fogo'),
+        showlegend=False
     )
-    figs['mapa'] = fig_map
-
-    return figs
+    
+    return {'temporal': fig_temp, 'top_risco': fig_risco, 'top_precip': fig_precip, 'mapa': fig_map}
 
 gdf_cnuc = carregar_shapefile(
     r"cnuc.shp"
@@ -1038,49 +972,27 @@ df_proc    = pd.read_csv(
     sep=";", encoding="windows-1252"
 )
 
-with st.sidebar:
-    st.header("⚙️ Filtros Principais") 
-    st.subheader("Área de Interesse")
-    opcoes_invadindo = ["Selecione", "Todos"] + sorted(
-        gdf_sigef["invadindo"].str.strip().unique().tolist()
-    )
-    invadindo_opcao = st.selectbox(
-        "Tipo de sobreposição:",
-        opcoes_invadindo,
-        index=0,
-        help="Selecione o tipo de área sobreposta para análise"
-    )
-
-if invadindo_opcao == "Selecione":
-    invadindo_opcao = None
-
-if invadindo_opcao and invadindo_opcao.lower() != "todos":
-    gdf_filtrado = gpd.sjoin(
-        gdf_cnuc,
-        gdf_sigef[
-            gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.lower()
-        ],
-        how="inner", 
-        predicate="intersects"
-    )
-    ids_selecionados = gdf_filtrado["id"].unique().tolist()
-else:
-    ids_selecionados = []
-
 caminho_fogo = r"Areas_de_interesse_ordenado.csv"
-df_fogo = carregar_dados_fogo(caminho_fogo, sep=';', encoding='latin1')
-figs_fogo = criar_figuras_fogo(df_fogo)
 
-fig_map = criar_figura(ids_selecionados, invadindo_opcao)
-perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(
-    ids_selecionados,
-    invadindo_opcao
-)
-
-tabs = st.tabs(["Sobreposições", "Queimadas", "Famílias", "Justiça", "INPE"])
+tabs = st.tabs(["Sobreposições", "CPT", "Justiça", "Queimadas", "Desmatamento"])
 
 with tabs[0]:
     st.header("Sobreposições")
+    with st.expander("ℹ️ Sobre esta seção", expanded=True):
+        st.write("""
+        Esta análise apresenta dados sobre sobreposições territoriais, incluindo:
+        - Percentuais de alertas e CARs sobre extensão territorial
+        - Distribuição por municípios
+        - Áreas e contagens por Unidade de Conservação
+        
+        Os dados são provenientes do CNUC (Cadastro Nacional de Unidades de Conservação) e SIGEF (Sistema de Gestão Fundiária).
+        """)
+        st.markdown(
+            "**Fonte Geral da Seção:** MMA - Ministério do Meio Ambiente. Cadastro Nacional de Unidades de Conservação. Brasília: MMA.", 
+            unsafe_allow_html=True
+        )
+
+    perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(None, None)
     cols = st.columns(5, gap="small")
     titulos = [
         ("Alertas / Ext. Ter.", f"{perc_alerta:.1f}%", "Área de alertas sobre extensão territorial"),
@@ -1113,111 +1025,332 @@ with tabs[0]:
 
     row1_map, row1_chart1 = st.columns([3, 2], gap="large")
     with row1_map:
+        opcoes_invadindo = ["Selecione", "Todos"] + sorted(gdf_sigef["invadindo"].str.strip().unique().tolist())
+        invadindo_opcao_temp = st.selectbox("Tipo de sobreposição:", opcoes_invadindo, index=0, help="Selecione o tipo de área sobreposta para análise")
+        invadindo_opcao = None if invadindo_opcao_temp == "Selecione" else invadindo_opcao_temp
+
+        if invadindo_opcao and invadindo_opcao.lower() != "todos":
+            gdf_filtrado = gpd.sjoin(gdf_cnuc, gdf_sigef[gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.lower()], how="inner", predicate="intersects")
+            ids_selecionados = gdf_filtrado["id"].unique().tolist()
+        else:
+            ids_selecionados = []
+
         st.subheader("Mapa de Unidades")
-        st.plotly_chart(fig_map, use_container_width=True)
+        fig_map = criar_figura(ids_selecionados, invadindo_opcao)
+        st.plotly_chart(fig_map, use_container_width=True, height=300)
+        st.caption("Figura 1.1: Distribuição espacial das unidades de conservação.")
+        with st.expander("Detalhes e Fonte da Figura 1.1"):
+            st.write("""
+            **Interpretação:**  
+            O mapa mostra a distribuição espacial das unidades de conservação na região, destacando as áreas com sobreposições selecionadas.
+
+            **Observações:**
+            - Áreas em destaque indicam unidades de conservação
+            - Cores diferentes representam diferentes tipos de unidades
+            - Sobreposições são destacadas quando selecionadas no filtro
+
+            **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
+            """)
+
+        st.subheader("Proporção da Área do CAR sobre a UC")
+        uc_names = ["Todas"] + sorted(gdf_cnuc_ha["nome_uc"].unique())
+        nome_uc = st.selectbox("Selecione a Unidade de Conservação:", uc_names)
+        modo_input = st.radio("Mostrar valores como:", ["Hectares (ha)", "% da UC"], horizontal=True)
+        modo = "absoluto" if modo_input == "Hectares (ha)" else "percent"
+        fig = fig_car_por_uc_donut(gdf_cnuc_ha, nome_uc, modo)
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("Figura 1.2: Comparação entre área do CAR e área restante da UC.")
+        with st.expander("Detalhes e Fonte da Figura 1.2"):
+            st.write("""
+            **Interpretação:**  
+            Este gráfico mostra a proporção entre a área cadastrada no CAR e a área restante da Unidade de Conservação (UC).
+
+            **Observações:**
+            - A área restante é o que sobra da UC após considerar a área cadastrada no CAR
+            - Pode ocorrer de o CAR ultrapassar 100% devido a sobreposições ou múltiplos cadastros em uma mesma área
+            - Valores podem ser visualizados em hectares ou percentual, conforme seleção acima
+
+            **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
+            """)
+
     with row1_chart1:
         st.subheader("Áreas por UC")
         st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha), use_container_width=True, height=350)
+        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação.")
+        with st.expander("Detalhes e Fonte da Figura 1.3"):
+            st.write("""
+            **Interpretação:**  
+            O gráfico apresenta a área em hectares de cada unidade de conservação, permitindo comparar suas extensões territoriais.
+
+            **Observações:**
+            - Barras representam área em hectares
+            - Linha tracejada indica a média
+            - Ordenado por tamanho da área
+
+            **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
+            """)
+
         st.subheader("Contagens por UC")
         st.plotly_chart(fig_contagens_uc(gdf_cnuc), use_container_width=True, height=350)
+        st.caption("Figura 1.4: Contagem de sobreposições por unidade de conservação.")
+        with st.expander("Detalhes e Fonte da Figura 1.4"):
+            st.write("""
+            **Interpretação:**  
+            O gráfico mostra o número de alertas e CARs sobrepostos a cada unidade de conservação.
+
+            **Observações:**
+            - Barras empilhadas mostram alertas e CARs
+            - Linha tracejada indica média total
+            - Ordenado por total de sobreposições
+
+            **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
+            """)
 
     st.divider()
 
-    st.subheader("Ocupações Retomadas")
-    st.plotly_chart(fig_ocupacoes(df_csv), use_container_width=True, height=300)
-
-st.markdown('<div class="spacer"></div>', unsafe_allow_html=True)
-
-figs_fogo = criar_figuras_fogo(df_fogo)
-
 with tabs[1]:
-    st.header('Focos de Calor')
-
-    col_filtros, _ = st.columns([1.5, 3])
-    with col_filtros:
-        st.markdown("### 🔎 Filtro por Ano")
-        anos = pd.to_datetime(df_fogo['date'], errors='coerce').dropna().dt.year.unique().tolist()
-        anos.sort()
-        ano_sel = st.selectbox('Selecione o ano:', [None] + anos, format_func=lambda x: 'Todos' if x is None else str(x))
-
-    df_fogo['date'] = pd.to_datetime(df_fogo['date'], errors='coerce')
-    figs_fogo_ano = criar_figuras_fogo(df_fogo, ano=ano_sel)
-
-    st.subheader(f"Evolução Diária — {ano_sel or 'Todos os anos'}")
-    st.plotly_chart(figs_fogo_ano['ts'], use_container_width=True, height=500)
-
-    col1, col2 = st.columns(2, gap='large')
-    with col1:
-        st.subheader('Top Municípios')
-        st.caption("Novo progresso tem apenas um registro, falta de dados.")        
-        st.plotly_chart(figs_fogo_ano['top_municipios'], use_container_width=True, height=400)
-    with col2:
-        st.subheader('Mapa de Focos')
-        st.plotly_chart(figs_fogo_ano['scatter_prec_risco'], use_container_width=True, height=400)
-
-with tabs[2]:
     st.header("Impacto Social")
+    with st.expander("ℹ️ Sobre esta seção", expanded=True):
+        st.write("""
+        Esta análise apresenta dados sobre impactos sociais relacionados a conflitos agrários, incluindo:
+        - Famílias afetadas
+        - Conflitos registrados 
+        - Ocupações retomadas
+
+        Os dados são provenientes da Comissão Pastoral da Terra (CPT).
+        """)
+        st.markdown(
+            "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.", 
+            unsafe_allow_html=True
+        )
+
     col_fam, col_conf = st.columns(2, gap="large")
     with col_fam:
-        st.subheader("Famílias Afetadas")
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
+        </div>""", unsafe_allow_html=True)
         st.plotly_chart(fig_familias(df_confmun), use_container_width=True, height=400, key="familias")
+        st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
+        with st.expander("Detalhes e Fonte da Figura 3.1"):
+            st.write("""
+            **Interpretação:**  
+            O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
+
+            **Observações:**
+            - Dados agregados por município
+            - Valores apresentados em ordem decrescente
+            - Inclui todos os tipos de conflitos registrados
+
+            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+            """)
+
     with col_conf:
-        st.subheader("Conflitos Registrados")
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados por município.</p>
+        </div>""", unsafe_allow_html=True)
         st.plotly_chart(fig_conflitos(df_confmun), use_container_width=True, height=400, key="conflitos")
+        st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
+        with st.expander("Detalhes e Fonte da Figura 3.2"):
+            st.write("""
+            **Interpretação:**  
+            O gráfico mostra o número total de conflitos agrários registrados em cada município.
+
+            **Observações:**
+            - Contagem total de ocorrências por município
+            - Ordenação por quantidade de conflitos
+            - Inclui todos os tipos de conflitos documentados
+
+            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+            """)
+
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 2rem 0 0.5rem 0;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
+    </div>""", unsafe_allow_html=True)
+    st.plotly_chart(fig_ocupacoes(df_csv), use_container_width=True, height=300, key="ocupacoes")
+    st.caption("Figura 3.3: Distribuição de ocupações retomadas por município.")
+    with st.expander("Detalhes e Fonte da Figura 3.3"):
+        st.write("""
+        **Interpretação:**  
+        O gráfico apresenta o número de áreas onde houve processos de retomada de ocupações por município.
+
+        **Observações:**
+        - Contabiliza áreas com processos de retomada concluídos
+        - Ordenação por quantidade de retomadas
+        - Permite visualizar concentração geográfica das ações
+
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+        """)
+
+
+
+with tabs[2]:
+    st.header("Processos Judiciais")
+    with st.expander("ℹ️ Sobre esta seção", expanded=True):
+        st.write("""
+        Esta análise apresenta dados sobre processos judiciais relacionados a questões ambientais, incluindo:
+        - Distribuição por municípios
+        - Classes processuais
+        - Assuntos
+        - Órgãos julgadores
+        
+        Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
+        """)
+        st.markdown(
+            "**Fonte Geral da Seção:** TJPA - Tribunal de Justiça do Estado do Pará. Processos Judiciais Ambientais. Belém: TJPA.",
+            unsafe_allow_html=True
+        )
+
+    figs_j = fig_justica(df_proc)
+    key_map = {"Municípios": "mun", "Classes": "class", "Assuntos": "ass", "Órgãos": "org", "Temporal": "temp"}
+    barras = ["Municípios", "Classes", "Assuntos", "Órgãos"]
+
+    cols = st.columns(2, gap="large")
+    for idx, key in enumerate(barras):
+        col = cols[idx % 2]
+        chart_key = key_map[key]
+        col.markdown(f"""
+            <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
+                <h3 style="margin:0 0 .5rem 0;">{key}</h3>
+                <p style="margin:0;font-size:.95em;color:#666;">Distribuição por {key.lower()}.</p>
+            </div>
+        """, unsafe_allow_html=True)
+        col.plotly_chart(figs_j[chart_key].update_layout(height=350), use_container_width=True, key=f"jud_{chart_key}")
+        col.caption(f"Figura 4.{idx+1}: Distribuição por {key.lower()}.")
+        with col.expander(f"ℹ️ Detalhes e Fonte da Figura 4.{idx+1}", expanded=False):
+            st.write(f"""
+            **Interpretação:**  
+            Distribuição dos processos por {key.lower()}.
+
+            **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
+            """)
+
+    st.markdown("""
+        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:1rem 0 .5rem 0;">
+            <h3 style="margin:0 0 .5rem 0;">Evolução Mensal de Processos</h3>
+            <p style="margin:0;font-size:.95em;color:#666;">Variação mensal ao longo do período.</p>
+        </div>
+    """, unsafe_allow_html=True)
+    st.plotly_chart(figs_j[key_map["Temporal"]].update_layout(height=400), use_container_width=True, key="jud_temp")
+    st.caption("Figura 4.5: Evolução temporal dos processos judiciais.")
+    with st.expander("ℹ️ Detalhes e Fonte da Figura 4.5", expanded=False):
+        st.write("""
+        **Interpretação:**  
+        Evolução mensal dos processos.
+
+        **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
+        """)
+
 
 with tabs[3]:
-    st.header("Processos Judiciais")
-    figs_j = fig_justica(df_proc)
-    key_map = {
-        "Municípios":"mun",
-        "Temporal":"temp",
-        "Classes":"class",
-        "Assuntos":"ass",
-        "Órgãos":"org"
-    }
-
-    barras = ["Municípios","Classes","Assuntos","Órgãos"]
-    for i in range(0, len(barras), 2):
-        cols = st.columns(2, gap="large")
-        for col, key in zip(cols, barras[i:i+2]):
-            chart_key = key_map[key]
-            col.subheader(key)
-            col.plotly_chart(
-                figs_j[chart_key],
-                use_container_width=True,
-                height=300,
-                key=f"jud_{chart_key}_{i//2}"
-            )
-
-    # ── gráfico de linha
-    st.subheader("Evolução Mensal de Processos")
-    st.plotly_chart(
-        figs_j[key_map["Temporal"]],
-        use_container_width=True,
-        height=500,
-        key="jud_temp_full"
-    )
-
-with tabs[4]:
     st.header("Focos de Calor")
+    with st.expander("ℹ️ Sobre esta seção", expanded=True):
+        st.write("""
+        Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:
+        - Risco de fogo
+        - Precipitação acumulada
+        - Distribuição espacial
+
+        Os dados são provenientes do Programa Queimadas do INPE.
+        """)
+        st.markdown(
+            "**Fonte Geral da Seção:** INPE – Instituto Nacional de Pesquisas Espaciais. Programa Queimadas: Monitoramento dos Focos Ativos por Estados. São José dos Campos: INPE, 2025.", 
+            unsafe_allow_html=True
+        )
+
+    # Carrega dados dos CSVs
     files = [
-        "./focos_municipios_filtrados_part1.csv",
-        "./focos_municipios_filtrados_part2.csv",
-        "./focos_municipios_filtrados_part3.csv",
-        "./focos_municipios_filtrados_part4.csv",
-        "./focos_municipios_filtrados_part5.csv",
-        "./focos_municipios_filtrados_part6.csv",
+        r"focos_municipios_filtrados_part1.csv",
+        r"focos_municipios_filtrados_part2.csv",
+        r"focos_municipios_filtrados_part3.csv",
+        r"focos_municipios_filtrados_part4.csv",
+        r"focos_municipios_filtrados_part5.csv",
+        r"focos_municipios_filtrados_part6.csv",
     ]
     df_inpe = load_inpe(files)
+
     if not df_inpe.empty:
-        figs = graficos_inpe(df_inpe)
+        # Select box de ano
+        anos = sorted(df_inpe['DataHora'].dt.year.unique())
+        ano_selecionado = st.selectbox(
+            'Selecione o ano para análise:',
+            anos,
+            index=len(anos) - 1
+        )
+
+        # Gera figuras
+        figs = graficos_inpe(df_inpe, ano_selecionado)
+
+        # 1. Evolução Temporal do Risco de Fogo
+        st.subheader("Evolução Temporal do Risco de Fogo")
+        st.plotly_chart(figs['temporal'], use_container_width=True)
+        st.caption(f"Figura 5.1: Evolução mensal do risco médio de fogo para o ano de {ano_selecionado}.")
+
+        with st.expander("Detalhes e Fonte da Figura 5.1"):
+            st.write(f"""
+            **Interpretação:**  
+            O gráfico mostra como o risco médio de fogo varia mês a mês em {ano_selecionado}, numa escala de 0 (mínimo) a 1 (máximo).
+
+            - **Pontos:** valores médios mensais.
+            - **Linha:** tendência ao longo do ano.
+
+            **Observação para {ano_selecionado}:**  
+            { {
+                2020: "Pico em agosto (0.94).",
+                2021: "Pico em julho (0.87).",
+                2022: "Pico em julho (0.83).",
+                2023: "Pico em agosto (0.69)."
+            }.get(ano_selecionado, "") }
+
+            **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Disponível em: https://terrabrasilis.dpi.inpe.br/queimadas/bdqueimadas/#exportar-dados. Acesso em: maio de 2025.
+            """)
+
+        # Duas colunas para os gráficos seguintes
         col1, col2 = st.columns(2, gap="large")
+
         with col1:
-            st.subheader("Risco e Precipitação")
+            # Top Municípios por Risco de Fogo
+            st.subheader("Top Municípios por Risco Médio de Fogo")
             st.plotly_chart(figs['top_risco'], use_container_width=True)
+            st.caption(f"Figura 5.2: Municípios com maior risco médio de fogo em {ano_selecionado}.")
+            with st.expander("Detalhes e Fonte da Figura 5.2"):
+                st.write(f"""
+                **Interpretação:**  
+                Ranking dos municípios com maior risco médio de fogo em {ano_selecionado}.
+
+                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                """)
+
+            # Top Municípios por Precipitação Acumulada
+            st.subheader("Top Municípios por Precipitação Acumulada")
             st.plotly_chart(figs['top_precip'], use_container_width=True)
+            st.caption(f"Figura 5.3: Municípios com maior precipitação acumulada em {ano_selecionado}.")
+            with st.expander("Detalhes e Fonte da Figura 5.3"):
+                st.write(f"""
+                **Interpretação:**  
+                Ranking dos municípios com maior volume de chuva (mm) em {ano_selecionado}.
+
+                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                """)
+
         with col2:
-            st.subheader("Mapa de Risco de Fogo")
+            # Mapa de Distribuição dos Focos de Calor
+            st.subheader("Mapa de Distribuição dos Focos de Calor")
             st.plotly_chart(figs['mapa'], use_container_width=True)
+            st.caption(f"Figura 5.4: Distribuição espacial dos focos de calor em {ano_selecionado}.")
+            with st.expander("Detalhes e Fonte da Figura 5.4"):
+                st.write(f"""
+                **Interpretação:**  
+                Cada ponto representa um foco de calor detectado por satélite em {ano_selecionado}.  
+                Alta densidade indica maior atividade de queimadas.
+
+                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                """)
+
     else:
         st.warning("Nenhum dado disponível após filtros.")
+
+with tabs[4]:
+    st.header("")
