@@ -4,3 +4,4 @@ pandas
 streamlit
 shapely
 openpyxl
+numpy
