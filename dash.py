@@ -8,6 +8,7 @@ import unicodedata
 import os
 import numpy as np
 
+
 st.set_page_config(
     page_title="Dashboard de Conflitos Ambientais",
     page_icon="🌳",
@@ -219,7 +220,7 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str) -> pd.DataFrame:
-    df = pd.read_csv(caminho)
+    df = pd.read_csv(caminho, low_memory=False)
     df = df.rename(columns={"Unnamed: 0": "Município"})
     cols = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
@@ -248,21 +249,26 @@ def criar_figura(ids_selecionados, invadindo_opcao):
         gdf_cnuc,
         geojson=gdf_cnuc.__geo_interface__,
         locations="id",
-        hover_data=["nome_uc", "municipio", "perc_alerta", "perc_sigef", "alerta_km2", "sigef_km2", "area_km2"],
+        hover_data=[
+            "nome_uc", "municipio", "perc_alerta", "perc_sigef",
+            "alerta_km2", "sigef_km2", "area_km2"
+        ],
         mapbox_style="open-street-map",
         center=centro,
         zoom=4,
         opacity=0.7
     )
-    
     if ids_selecionados:
-        ids_selecionados = list(set(ids_selecionados))
-        gdf_sel = gdf_cnuc[gdf_cnuc["id"].isin(ids_selecionados)]
+        ids = list(set(ids_selecionados))
+        gdf_sel = gdf_cnuc[gdf_cnuc["id"].isin(ids)]
         fig_sel = px.choropleth_mapbox(
             gdf_sel,
             geojson=gdf_cnuc.__geo_interface__,
             locations="id",
-            hover_data=["nome_uc", "municipio", "perc_alerta", "perc_sigef", "alerta_km2", "sigef_km2", "area_km2"],
+            hover_data=[
+                "nome_uc", "municipio", "perc_alerta", "perc_sigef",
+                "alerta_km2", "sigef_km2", "area_km2"
+            ],
             mapbox_style="open-street-map",
             center=centro,
             zoom=4,
@@ -270,13 +276,20 @@ def criar_figura(ids_selecionados, invadindo_opcao):
         )
         for trace in fig_sel.data:
             fig.add_trace(trace)
-    
     if invadindo_opcao is not None:
-        gdf_sigef_filtrado = gdf_sigef if invadindo_opcao.lower() == "todos" else gdf_sigef[gdf_sigef["invadindo"].str.strip().str.lower() == invadindo_opcao.strip().lower()]
+        filtro = (
+            gdf_sigef
+            if invadindo_opcao.lower() == "todos"
+            else gdf_sigef[
+                gdf_sigef["invadindo"]
+                .str.strip()
+                .str.lower() == invadindo_opcao.strip().lower()
+            ]
+        )
         trace_sigef = go.Choroplethmapbox(
-            geojson=gdf_sigef_filtrado.__geo_interface__,
-            locations=gdf_sigef_filtrado["id_sigef"],
-            z=[1] * len(gdf_sigef_filtrado),
+            geojson=filtro.__geo_interface__,
+            locations=filtro["id_sigef"],
+            z=[1] * len(filtro),
             colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
             marker_opacity=0.5,
             marker_line_width=1,
@@ -284,51 +297,57 @@ def criar_figura(ids_selecionados, invadindo_opcao):
             showscale=False
         )
         fig.add_trace(trace_sigef)
-    
-    df_csv_unique = df_csv.drop_duplicates(subset=['Município'])
-    
+    df_csv_unique = df_csv.drop_duplicates(subset=["Município"])
     cidades = df_csv_unique["Município"].unique()
-    cores_paleta = px.colors.qualitative.Pastel
-    color_map = {cidade: cores_paleta[i % len(cores_paleta)] for i, cidade in enumerate(cidades)}
-    
-    for cidade in cidades:
-        df_cidade = df_csv_unique[df_csv_unique["Município"] == cidade]
-        base_size = list(df_cidade["total_ocorrencias"] * 10)
-        outline_size = [s + 4 for s in base_size]
-        
-        trace_cpt_outline = go.Scattermapbox(
-            lat=df_cidade["Latitude"],
-            lon=df_cidade["Longitude"],
+    paleta = px.colors.qualitative.Pastel
+    mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
+    for c in cidades:
+        df_c = df_csv_unique[df_csv_unique["Município"] == c]
+        base = (df_c["total_ocorrencias"] * 10).tolist()
+        outline = [s + 4 for s in base]
+        fig.add_trace(go.Scattermapbox(
+            lat=df_c["Latitude"],
+            lon=df_c["Longitude"],
             mode="markers",
-            marker=dict(size=outline_size, color="black", sizemode="area", opacity=0.8),
+            marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
             hoverinfo="none",
             showlegend=False
-        )
-        
-        trace_cpt = go.Scattermapbox(
-            lat=df_cidade["Latitude"],
-            lon=df_cidade["Longitude"],
+        ))
+        fig.add_trace(go.Scattermapbox(
+            lat=df_c["Latitude"],
+            lon=df_c["Longitude"],
             mode="markers",
-            marker=dict(size=base_size, color=color_map[cidade], sizemode="area"),
-            text=df_cidade.apply(lambda linha: f"Município: {linha['Município']}<br>Áreas de conflitos: {linha['Áreas de conflitos']}<br>Assassinatos: {linha['Assassinatos']}", axis=1),
+            marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
+            text=df_c.apply(
+                lambda r: (
+                    f"Município: {r['Município']}<br>"
+                    f"Áreas de conflitos: {r['Áreas de conflitos']}<br>"
+                    f"Assassinatos: {r['Assassinatos']}"
+                ),
+                axis=1
+            ),
             hoverinfo="text",
-            name=f"Ocorrências - {cidade}",
+            name=f"<b>Ocorrências – {c}</b>", 
             showlegend=True
+        ))
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=centro,
+                zoom=4
+            ),
+            margin={"r":0,"t":0,"l":0,"b":0},
+            legend=dict(
+                x=0.01,         
+                y=0.99,           
+                xanchor="left",
+                yanchor="top",
+                bgcolor="rgba(255,255,255,0)", 
+                bordercolor="rgba(0,0,0,0)",    
+                font=dict(size=10)
+            ),
+            height=550
         )
-
-        fig.add_trace(trace_cpt_outline)
-        fig.add_trace(trace_cpt)
-    
-    fig.update_layout(
-        margin={"r":0,"t":0,"l":0,"b":0},
-        legend=dict(
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="#CCC",
-            borderwidth=1,
-            font=dict(size=10)
-        ),
-        height=550
-    )
     return fig
 
 def criar_cards(ids_selecionados, invadindo_opcao):
@@ -588,7 +607,6 @@ def fig_car_por_uc_donut(gdf_cnuc_ha: gpd.GeoDataFrame, nome_uc: str, modo_valor
     )
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
-
 def fig_ocupacoes(df_csv: pd.DataFrame) -> go.Figure:
     df = (
         df_csv
@@ -828,52 +846,24 @@ def corrige_coord(x):
         return np.nan
     return x / 1e5 if abs(x) > 180 else x
 
-@st.cache_data(show_spinner=False)
-def load_inpe(filepaths: list[str], chunksize: int = 100_000) -> pd.DataFrame:
-    cols = ['DataHora', 'RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
-    dfs = []
-    total_chunks = 0
-    progress = st.progress(0)
-    for path in filepaths:
-        with open(path, 'r', encoding='utf-8') as f:
-            sample = f.read(2048)
-        delim = ',' if sample.count(',') > sample.count(';') else ';'
-        for i, chunk in enumerate(pd.read_csv(path, sep=delim, usecols=cols, iterator=True, chunksize=chunksize, encoding='utf-8')):
-            chunk = chunk.dropna()
-            chunk = chunk[chunk['RiscoFogo'] > 0]
-            dfs.append(chunk)
-            total_chunks += 1
-            progress.progress(min(total_chunks / (20 * len(filepaths)), 1.0))
-    df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
-    df['DataHora'] = pd.to_datetime(df['DataHora'])
-    return df
-
 def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
     df = df[df['DataHora'].dt.year == ano]
     df_indexed = df.set_index('DataHora')
     df_indexed = df_indexed[df_indexed['RiscoFogo'].between(0, 1)]
-    df_indexed['RiscoFogo'] = df_indexed['RiscoFogo'].fillna(method='ffill')
-    
-    monthly = df_indexed.resample('M')['RiscoFogo'].mean().reset_index()
+    monthly = df_indexed['RiscoFogo'].resample('ME').mean().reset_index()
+    monthly['RiscoFogo'] = monthly['RiscoFogo'].fillna(0)
 
     fig_temp = go.Figure()
-
-    # Gráfico mensal
     fig_temp.add_trace(go.Scatter(
         x=monthly['DataHora'].dt.to_period('M').astype(str),
         y=monthly['RiscoFogo'],
         name='Risco de Fogo Mensal',
         mode='lines+markers+text',
-        marker=dict(
-            size=8,
-            color='#FF4136',
-            line=dict(width=1, color='#444')
-        ),
+        marker=dict(size=8, color='#FF4136', line=dict(width=1, color='#444')),
         line=dict(width=2, color='#FF4136'),
         text=[f'{v:.2f}' for v in monthly['RiscoFogo']],
         textposition='top center'
     ))
-
     fig_temp.update_layout(
         title='Evolução Mensal do Risco de Fogo',
         xaxis_title='Mês',
@@ -883,7 +873,7 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
         showlegend=True,
         hovermode='x unified'
     )
-    
+
     top_risco = df.groupby('mun_corrigido')['RiscoFogo'].mean().nlargest(10).sort_values()
     fig_risco = go.Figure(go.Bar(
         y=top_risco.index,
@@ -900,7 +890,7 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
         height=400,
         margin=dict(l=60, r=80, t=50, b=40)
     )
-    
+
     top_precip = df.groupby('mun_corrigido')['Precipitacao'].mean().nlargest(10).sort_values()
     fig_precip = go.Figure(go.Bar(
         y=top_precip.index,
@@ -917,15 +907,15 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
         height=400,
         margin=dict(l=60, r=80, t=50, b=40)
     )
-    
+
     df_plot = df.sample(50000, random_state=1) if len(df) > 50000 else df
     lat_min, lat_max = df_plot['Latitude'].min(), df_plot['Latitude'].max()
     lon_min, lon_max = df_plot['Longitude'].min(), df_plot['Longitude'].max()
     centro = {'lat': (lat_min + lat_max) / 2, 'lon': (lon_min + lon_max) / 2}
     span = max(lat_max - lat_min, lon_max - lon_min)
     zoom = 10 if span < 1 else 8 if span < 5 else 6 if span < 10 else 4
-    
-    fig_map = px.scatter_mapbox(
+
+    fig_map = px.scatter_map(
         df_plot,
         lat='Latitude',
         lon='Longitude',
@@ -944,8 +934,83 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
         coloraxis_colorbar=dict(title='Risco de Fogo'),
         showlegend=False
     )
+
+    return {
+        'temporal': fig_temp,
+        'top_risco': fig_risco,
+        'top_precip': fig_precip,
+        'mapa': fig_map
+    }
+
+def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
+    df_a = gdf_alertas[['MUNICIPIO', 'AREAHA']].rename(columns={'MUNICIPIO':'municipio', 'AREAHA':'alerta_ha'})
+    df_s = gdf_sigef[['municipio', 'area_km2']].rename(columns={'area_km2':'sigef_ha'})
+    df_s['sigef_ha'] = pd.to_numeric(df_s['sigef_ha'], errors='coerce').fillna(0) * 100
+    df_c = gdf_cnuc[['municipio', 'ha_total']].rename(columns={'ha_total':'uc_ha'})
+
+    df_alertas_mun = df_a.groupby('municipio', as_index=False)['alerta_ha'].sum()
+    df_sigef_mun = df_s.groupby('municipio', as_index=False)['sigef_ha'].sum()
+    df_cnuc_mun = df_c.groupby('municipio', as_index=False)['uc_ha'].sum()
+
+    df_merged = df_alertas_mun.merge(df_sigef_mun, on='municipio', how='outer')
+    df_merged = df_merged.merge(df_cnuc_mun, on='municipio', how='outer').fillna(0)
+
+    cols = ['alerta_ha', 'sigef_ha', 'uc_ha']
+    for c in cols:
+        df_merged[c] = pd.to_numeric(df_merged[c], errors='coerce').fillna(0)
     
-    return {'temporal': fig_temp, 'top_risco': fig_risco, 'top_precip': fig_precip, 'mapa': fig_map}
+    total_alertas = df_merged['alerta_ha'].sum()
+    total_sigef = df_merged['sigef_ha'].sum() 
+    total_uc = df_merged['uc_ha'].sum()
+
+    df_merged = df_merged[~((df_merged[cols] == 0).all(axis=1))]
+    df_merged = df_merged.sort_values('municipio').reset_index(drop=True)
+    df_merged = df_merged.rename(columns={
+        'municipio': 'MUNICÍPIO',
+        'alerta_ha': 'ALERTAS(HA)',
+        'sigef_ha': 'SIGEF(HA)', 
+        'uc_ha': 'CNUC(HA)'
+    })
+
+    total_row = pd.DataFrame([{
+        'MUNICÍPIO': 'TOTAL(HA)',
+        'ALERTAS(HA)': total_alertas,
+        'SIGEF(HA)': total_sigef,
+        'CNUC(HA)': total_uc
+    }])
+    
+    df_merged = pd.concat([df_merged, total_row], ignore_index=True)
+
+    styles = []
+    colors = {
+        'ALERTAS(HA)':'#fde0dd', 
+        'SIGEF(HA)':'#e0ecf4', 
+        'CNUC(HA)':'#edf8e9'
+    }
+    for i, c in enumerate(df_merged.columns):
+        if c in colors:
+            styles.append({'selector': f'td.col{i}', 'props': [('background-color', colors[c])]})
+    
+    styles.append({
+        'selector': 'tr:last-child',
+        'props': [('font-weight', 'bold'), ('background-color', '#f0f0f0')]
+    })
+
+    styled = (
+        df_merged.style
+                 .format({c:'{:,.2f}' for c in ['ALERTAS(HA)', 'SIGEF(HA)', 'CNUC(HA)']})
+                 .set_table_styles(styles)
+                 .set_table_attributes('style="border-collapse:collapse"')
+    )
+
+    st.subheader("Tabela Área")
+    st.markdown(styled.to_html(), unsafe_allow_html=True)
+
+gdf_alertas = carregar_shapefile(
+    r"alertas.shp",
+    calcular_percentuais=False
+)
+gdf_alertas = gdf_alertas.rename(columns={"id":"id_alerta"})
 
 gdf_cnuc = carregar_shapefile(
     r"cnuc.shp"
@@ -1037,7 +1102,12 @@ with tabs[0]:
 
         st.subheader("Mapa de Unidades")
         fig_map = criar_figura(ids_selecionados, invadindo_opcao)
-        st.plotly_chart(fig_map, use_container_width=True, height=300)
+        st.plotly_chart(
+            fig_map,
+            use_container_width=True,
+            height=300,
+            config={"scrollZoom": True}
+        )
         st.caption("Figura 1.1: Distribuição espacial das unidades de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.1"):
             st.write("""
@@ -1106,6 +1176,27 @@ with tabs[0]:
             **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
             """)
 
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela Unificada</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Visualização unificada dos dados de alertas, SIGEF e CNUC.</p>
+    </div>""", unsafe_allow_html=True)
+    mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc)
+    st.caption("Tabela 1.1: Dados consolidados por município.")
+    with st.expander("Detalhes e Fonte da Tabela 1.1"):
+        st.write("""
+        **Interpretação:**  
+        A tabela apresenta os dados consolidados por município, incluindo:
+        - Área de alertas em hectares
+        - Área do SIGEF em hectares
+        - Área do CNUC em hectares
+
+        **Observações:**
+        - Valores em hectares
+        - Totais na última linha
+        - Células coloridas por tipo de dado
+
+        **Fonte:** MMA - Ministério do Meio Ambiente. *Cadastro Nacional de Unidades de Conservação*. Brasília: MMA, 2025. Disponível em: https://www.gov.br/mma/. Acesso em: maio de 2025.
+        """)
     st.divider()
 
 with tabs[1]:
@@ -1184,8 +1275,6 @@ with tabs[1]:
         **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
         """)
 
-
-
 with tabs[2]:
     st.header("Processos Judiciais")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
@@ -1243,14 +1332,13 @@ with tabs[2]:
         **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
         """)
 
-
 with tabs[3]:
     st.header("Focos de Calor")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
         Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:
         - Risco de fogo
-        - Precipitação acumulada
+        - Precipitação acumulada  
         - Distribuição espacial
 
         Os dados são provenientes do Programa Queimadas do INPE.
@@ -1264,11 +1352,43 @@ with tabs[3]:
     files = [
         r"focos_municipios_filtrados_part1.csv",
         r"focos_municipios_filtrados_part2.csv",
-        r"focos_municipios_filtrados_part3.csv",
+        r"focos_municipios_filtrados_part3.csv", 
         r"focos_municipios_filtrados_part4.csv",
         r"focos_municipios_filtrados_part5.csv",
         r"focos_municipios_filtrados_part6.csv",
+        r"focos_municipios_filtrados_2024_parte_1.csv",
+        r"focos_municipios_filtrados_2024_parte_2.csv",
+        r"focos_municipios_filtrados_2024_parte_3.csv",
+        r"focos_municipios_filtrados_2024_parte_4.csv"
     ]
+    
+    @st.cache_data(show_spinner=False)
+    def load_inpe(filepaths):
+        cols = ['DataHora', 'RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
+        dfs = []
+        total_chunks = 0
+        progress = st.progress(0)
+        for path in filepaths:
+            with open(path, 'r', encoding='utf-8') as f:
+                sample = f.read(2048)
+            delim = ',' if sample.count(',') > sample.count(';') else ';'
+            for i, chunk in enumerate(pd.read_csv(path, sep=delim, usecols=cols, iterator=True, chunksize=100_000, encoding='utf-8')):
+                # Aplicando os mesmos critérios para todos os anos
+                chunk = chunk[
+                    (chunk['RiscoFogo'].between(0, 1)) & 
+                    (chunk['Precipitacao'] >= 0) &
+                    (chunk['DiaSemChuva'] >= 0) &
+                    (chunk['Latitude'].between(-15, 5)) &  
+                    (chunk['Longitude'].between(-60, -45))
+                ]
+                chunk = chunk.dropna()
+                dfs.append(chunk)
+                total_chunks += 1
+                progress.progress(min(total_chunks / (20 * len(filepaths)), 1.0))
+        df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
+        df['DataHora'] = pd.to_datetime(df['DataHora'], format='mixed')
+        return df
+
     df_inpe = load_inpe(files)
 
     if not df_inpe.empty:
@@ -1280,7 +1400,6 @@ with tabs[3]:
             index=len(anos) - 1
         )
 
-        # Gera figuras
         figs = graficos_inpe(df_inpe, ano_selecionado)
 
         # 1. Evolução Temporal do Risco de Fogo
@@ -1301,13 +1420,12 @@ with tabs[3]:
                 2020: "Pico em agosto (0.94).",
                 2021: "Pico em julho (0.87).",
                 2022: "Pico em julho (0.83).",
-                2023: "Pico em agosto (0.69)."
+                2023: "Pico em agosto (0.69).",
+                2024: "Pico em setembro (0.96)."
             }.get(ano_selecionado, "") }
 
             **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Disponível em: https://terrabrasilis.dpi.inpe.br/queimadas/bdqueimadas/#exportar-dados. Acesso em: maio de 2025.
             """)
-
-        # Duas colunas para os gráficos seguintes
         col1, col2 = st.columns(2, gap="large")
 
         with col1:
@@ -1319,6 +1437,7 @@ with tabs[3]:
                 st.write(f"""
                 **Interpretação:**  
                 Ranking dos municípios com maior risco médio de fogo em {ano_selecionado}.
+                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
                 **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
                 """)
@@ -1331,6 +1450,7 @@ with tabs[3]:
                 st.write(f"""
                 **Interpretação:**  
                 Ranking dos municípios com maior volume de chuva (mm) em {ano_selecionado}.
+                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
                 **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
                 """)
@@ -1345,6 +1465,7 @@ with tabs[3]:
                 **Interpretação:**  
                 Cada ponto representa um foco de calor detectado por satélite em {ano_selecionado}.  
                 Alta densidade indica maior atividade de queimadas.
+                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
                 **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
                 """)
