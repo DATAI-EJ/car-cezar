@@ -1030,7 +1030,7 @@ df_csv     = load_csv(
     r"CPT-PA-count.csv"
 )
 df_confmun = carregar_dados_conflitos_municipio(
-    r"áreas-selecionadas\CPTF-PA.xlsx"
+    r"CPTF-PA.xlsx"
 )
 df_proc    = pd.read_csv(
     r"processos_tjpa_completo_atualizada_pronto.csv",
