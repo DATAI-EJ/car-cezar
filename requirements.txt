@@ -5,3 +5,4 @@ streamlit
 shapely
 openpyxl
 numpy
+duckdb
