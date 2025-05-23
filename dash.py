@@ -7,7 +7,7 @@ import plotly.io as pio
 import unicodedata
 import os
 import numpy as np
-
+import duckdb
 
 st.set_page_config(
     page_title="Dashboard de Conflitos Ambientais",
@@ -1030,7 +1030,7 @@ df_csv     = load_csv(
     r"CPT-PA-count.csv"
 )
 df_confmun = carregar_dados_conflitos_municipio(
-    r"CPTF-PA.xlsx"
+    r"áreas-selecionadas\CPTF-PA.xlsx"
 )
 df_proc    = pd.read_csv(
     r"processos_tjpa_completo_atualizada_pronto.csv",
@@ -1288,7 +1288,7 @@ with tabs[2]:
         Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** TJPA - Tribunal de Justiça do Estado do Pará. Processos Judiciais Ambientais. Belém: TJPA.",
+            "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
             unsafe_allow_html=True
         )
 
@@ -1334,6 +1334,7 @@ with tabs[2]:
 
 with tabs[3]:
     st.header("Focos de Calor")
+
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
         Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:
@@ -1344,15 +1345,14 @@ with tabs[3]:
         Os dados são provenientes do Programa Queimadas do INPE.
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** INPE – Instituto Nacional de Pesquisas Espaciais. Programa Queimadas: Monitoramento dos Focos Ativos por Estados. São José dos Campos: INPE, 2025.", 
+            "**Fonte Geral da Seção:** INPE – Instituto Nacional de Pesquisas Espaciais. Programa Queimadas: Monitoramento dos Focos Ativos por Estados. São José dos Campos: INPE, 2025.",
             unsafe_allow_html=True
         )
 
-    # Carrega dados dos CSVs
     files = [
         r"focos_municipios_filtrados_part1.csv",
         r"focos_municipios_filtrados_part2.csv",
-        r"focos_municipios_filtrados_part3.csv", 
+        r"focos_municipios_filtrados_part3.csv",
         r"focos_municipios_filtrados_part4.csv",
         r"focos_municipios_filtrados_part5.csv",
         r"focos_municipios_filtrados_part6.csv",
@@ -1361,48 +1361,41 @@ with tabs[3]:
         r"focos_municipios_filtrados_2024_parte_3.csv",
         r"focos_municipios_filtrados_2024_parte_4.csv"
     ]
-    
+
     @st.cache_data(show_spinner=False)
-    def load_inpe(filepaths):
-        cols = ['DataHora', 'RiscoFogo', 'Precipitacao', 'mun_corrigido', 'DiaSemChuva', 'Latitude', 'Longitude']
-        dfs = []
-        total_chunks = 0
-        progress = st.progress(0)
+    def load_inpe_duckdb(filepaths):
+        conn = duckdb.connect(database=':memory:')
+        queries = []
         for path in filepaths:
-            with open(path, 'r', encoding='utf-8') as f:
-                sample = f.read(2048)
-            delim = ',' if sample.count(',') > sample.count(';') else ';'
-            for i, chunk in enumerate(pd.read_csv(path, sep=delim, usecols=cols, iterator=True, chunksize=100_000, encoding='utf-8')):
-                # Aplicando os mesmos critérios para todos os anos
-                chunk = chunk[
-                    (chunk['RiscoFogo'].between(0, 1)) & 
-                    (chunk['Precipitacao'] >= 0) &
-                    (chunk['DiaSemChuva'] >= 0) &
-                    (chunk['Latitude'].between(-15, 5)) &  
-                    (chunk['Longitude'].between(-60, -45))
-                ]
-                chunk = chunk.dropna()
-                dfs.append(chunk)
-                total_chunks += 1
-                progress.progress(min(total_chunks / (20 * len(filepaths)), 1.0))
-        df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame(columns=cols)
-        df['DataHora'] = pd.to_datetime(df['DataHora'], format='mixed')
+            queries.append(f"""
+                SELECT 
+                    try_cast(DataHora as TIMESTAMP) AS DataHora,
+                    try_cast(RiscoFogo AS DOUBLE) AS RiscoFogo,
+                    try_cast(Precipitacao AS DOUBLE) AS Precipitacao,
+                    try_cast(mun_corrigido AS VARCHAR) AS mun_corrigido,
+                    try_cast(DiaSemChuva AS INT) AS DiaSemChuva,
+                    try_cast(Latitude AS DOUBLE) AS Latitude,
+                    try_cast(Longitude AS DOUBLE) AS Longitude
+                FROM read_csv_auto('{path}')
+                WHERE 
+                    RiscoFogo BETWEEN 0 AND 1 AND 
+                    Precipitacao >= 0 AND 
+                    DiaSemChuva >= 0 AND
+                    Latitude BETWEEN -15 AND 5 AND
+                    Longitude BETWEEN -60 AND -45
+            """)
+        full_query = " UNION ALL ".join(queries)
+        df = conn.execute(full_query).fetchdf()
+        df = df.dropna(subset=['DataHora'])
         return df
 
-    df_inpe = load_inpe(files)
+    df_inpe = load_inpe_duckdb(files)
 
     if not df_inpe.empty:
-        # Select box de ano
-        anos = sorted(df_inpe['DataHora'].dt.year.unique())
-        ano_selecionado = st.selectbox(
-            'Selecione o ano para análise:',
-            anos,
-            index=len(anos) - 1
-        )
-
+        anos = sorted(df_inpe['DataHora'].dt.year.dropna().unique())
+        ano_selecionado = st.selectbox('Selecione o ano para análise:', anos, index=len(anos) - 1)
         figs = graficos_inpe(df_inpe, ano_selecionado)
 
-        # 1. Evolução Temporal do Risco de Fogo
         st.subheader("Evolução Temporal do Risco de Fogo")
         st.plotly_chart(figs['temporal'], use_container_width=True)
         st.caption(f"Figura 5.1: Evolução mensal do risco médio de fogo para o ano de {ano_selecionado}.")
@@ -1424,12 +1417,12 @@ with tabs[3]:
                 2024: "Pico em setembro (0.96)."
             }.get(ano_selecionado, "") }
 
-            **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Disponível em: https://terrabrasilis.dpi.inpe.br/queimadas/bdqueimadas/#exportar-dados. Acesso em: maio de 2025.
+            **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025.
             """)
+
         col1, col2 = st.columns(2, gap="large")
 
         with col1:
-            # Top Municípios por Risco de Fogo
             st.subheader("Top Municípios por Risco Médio de Fogo")
             st.plotly_chart(figs['top_risco'], use_container_width=True)
             st.caption(f"Figura 5.2: Municípios com maior risco médio de fogo em {ano_selecionado}.")
@@ -1439,10 +1432,9 @@ with tabs[3]:
                 Ranking dos municípios com maior risco médio de fogo em {ano_selecionado}.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
-                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
 
-            # Top Municípios por Precipitação Acumulada
             st.subheader("Top Municípios por Precipitação Acumulada")
             st.plotly_chart(figs['top_precip'], use_container_width=True)
             st.caption(f"Figura 5.3: Municípios com maior precipitação acumulada em {ano_selecionado}.")
@@ -1452,11 +1444,10 @@ with tabs[3]:
                 Ranking dos municípios com maior volume de chuva (mm) em {ano_selecionado}.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
-                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
 
         with col2:
-            # Mapa de Distribuição dos Focos de Calor
             st.subheader("Mapa de Distribuição dos Focos de Calor")
             st.plotly_chart(figs['mapa'], use_container_width=True)
             st.caption(f"Figura 5.4: Distribuição espacial dos focos de calor em {ano_selecionado}.")
@@ -1467,7 +1458,7 @@ with tabs[3]:
                 Alta densidade indica maior atividade de queimadas.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
-                **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025. Acesso em: maio de 2025.
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
 
     else:
