@@ -915,7 +915,7 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
     span = max(lat_max - lat_min, lon_max - lon_min)
     zoom = 10 if span < 1 else 8 if span < 5 else 6 if span < 10 else 4
 
-    fig_map = px.scatter_map(
+    fig_map = px.scatter_mapbox(
         df_plot,
         lat='Latitude',
         lon='Longitude',
@@ -927,13 +927,16 @@ def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
         zoom=zoom,
         center=centro
     )
+
     fig_map.update_layout(
         mapbox=dict(style='open-street-map'),
         margin=dict(l=0, r=0, t=30, b=0),
-        coloraxis_showscale=True,
-        coloraxis_colorbar=dict(title='Risco de Fogo'),
-        showlegend=False
+        coloraxis_showscale=False,
+        dragmode='pan',
+        hovermode='closest'
     )
+
+    fig_map.update_layout(clickmode='event+select')
 
     return {
         'temporal': fig_temp,
@@ -1449,7 +1452,11 @@ with tabs[3]:
 
         with col2:
             st.subheader("Mapa de Distribuição dos Focos de Calor")
-            st.plotly_chart(figs['mapa'], use_container_width=True)
+            st.plotly_chart( 
+                figs['mapa'], 
+                use_container_width=True, 
+                config={'scrollZoom': True}
+            )
             st.caption(f"Figura 5.4: Distribuição espacial dos focos de calor em {ano_selecionado}.")
             with st.expander("Detalhes e Fonte da Figura 5.4"):
                 st.write(f"""
