@@ -1531,7 +1531,7 @@ with tabs[2]:
         Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** TJPA - Tribunal de Justiça do Estado do Pará. Processos Judiciais Ambientais. Belém: TJPA.",
+            "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
             unsafe_allow_html=True
         )
 
@@ -1556,7 +1556,7 @@ with tabs[2]:
             **Interpretação:**
             Distribuição dos processos por {key.lower()}.
 
-            **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
+            **Fonte:** CNJ - Conselho Nacional de Justiça, 2025.
             """)
 
     st.markdown("""
@@ -1572,7 +1572,7 @@ with tabs[2]:
         **Interpretação:**
         Evolução mensal dos processos.
 
-        **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
+        **Fonte:** CNJ - Conselho Nacional de Justiça, 2025.
         """)
 
 with tabs[3]:
