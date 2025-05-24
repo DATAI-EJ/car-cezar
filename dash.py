@@ -841,97 +841,167 @@ def corrige_coord(x):
         return np.nan
     return x / 1e5 if abs(x) > 180 else x
 
-def graficos_inpe(df: pd.DataFrame, ano: int) -> dict:
-    df = df[df['DataHora'].dt.year == ano]
-    df_indexed = df.set_index('DataHora')
-    df_indexed = df_indexed[df_indexed['RiscoFogo'].between(0, 1)]
-    monthly = df_indexed['RiscoFogo'].resample('ME').mean().reset_index()
-    monthly['RiscoFogo'] = monthly['RiscoFogo'].fillna(0)
+def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str) -> dict[str, go.Figure]:
+    df = data_frame_entrada.copy()
+    def create_placeholder_fig(title_message: str) -> go.Figure:
+        fig = go.Figure()
+        fig.update_layout(
+            title=title_message,
+            xaxis_visible=False,
+            yaxis_visible=False,
+            annotations=[dict(text="Não há dados suficientes para exibir este gráfico.", showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5)]
+        )
+        return fig
 
-    fig_temp = go.Figure()
-    fig_temp.add_trace(go.Scatter(
-        x=monthly['DataHora'].dt.to_period('M').astype(str),
-        y=monthly['RiscoFogo'],
-        name='Risco de Fogo Mensal',
-        mode='lines+markers+text',
-        marker=dict(size=8, color='#FF4136', line=dict(width=1, color='#444')),
-        line=dict(width=2, color='#FF4136'),
-        text=[f'{v:.2f}' for v in monthly['RiscoFogo']],
-        textposition='top center'
-    ))
-    fig_temp.update_layout(
-        title='Evolução Mensal do Risco de Fogo',
-        xaxis_title='Mês',
-        yaxis_title='Risco Médio',
-        height=400,
-        margin=dict(l=60, r=80, t=80, b=40),
-        showlegend=True,
-        hovermode='x unified'
-    )
+    base_error_title = f"Período: {ano_selecionado_str}"
 
-    top_risco = df.groupby('mun_corrigido')['RiscoFogo'].mean().nlargest(10).sort_values()
-    fig_risco = go.Figure(go.Bar(
-        y=top_risco.index,
-        x=top_risco.values,
-        orientation='h',
-        marker_color='#FF8C7A',
-        text=top_risco.values,
-        texttemplate='<b>%{text:.2f}</b>',
-        textposition='outside'
-    ))
-    fig_risco.update_layout(
-        title='Top Municípios - Risco de Fogo',
-        xaxis_title='Risco Médio',
-        height=400,
-        margin=dict(l=60, r=80, t=50, b=40)
-    )
+    if df.empty:
+        return {
+            'temporal': create_placeholder_fig(f"Evolução Temporal ({base_error_title})"),
+            'top_risco': create_placeholder_fig(f"Top Risco ({base_error_title})"),
+            'top_precip': create_placeholder_fig(f"Top Precipitação ({base_error_title})"),
+            'mapa': create_placeholder_fig(f"Mapa de Focos ({base_error_title})")
+        }
 
-    top_precip = df.groupby('mun_corrigido')['Precipitacao'].mean().nlargest(10).sort_values()
-    fig_precip = go.Figure(go.Bar(
-        y=top_precip.index,
-        x=top_precip.values,
-        orientation='h',
-        marker_color='#B3D9FF',
-        text=top_precip.values,
-        texttemplate='<b>%{text:.1f} mm</b>',
-        textposition='outside'
-    ))
-    fig_precip.update_layout(
-        title='Top Municípios - Precipitação',
-        xaxis_title='Precipitação Média (mm)',
-        height=400,
-        margin=dict(l=60, r=80, t=50, b=40)
-    )
+    # --- Gráfico de Evolução Temporal do Risco de Fogo ---
+    fig_temp = create_placeholder_fig(f"Evolução Temporal do Risco de Fogo ({ano_selecionado_str})")
+    if 'DataHora' in df.columns and 'RiscoFogo' in df.columns:
+        df_temp_indexed = df.set_index('DataHora')
+        df_risco_valido_temp = df_temp_indexed[df_temp_indexed['RiscoFogo'].between(0, 1)]
+        if not df_risco_valido_temp.empty:
+            monthly_risco = df_risco_valido_temp['RiscoFogo'].resample('ME').mean().reset_index()
+            monthly_risco['RiscoFogo'] = monthly_risco['RiscoFogo'].fillna(0) 
 
-    df_plot = df.sample(50000, random_state=1) if len(df) > 50000 else df
-    lat_min, lat_max = df_plot['Latitude'].min(), df_plot['Latitude'].max()
-    lon_min, lon_max = df_plot['Longitude'].min(), df_plot['Longitude'].max()
-    centro = {'lat': (lat_min + lat_max) / 2, 'lon': (lon_min + lon_max) / 2}
-    span = max(lat_max - lat_min, lon_max - lon_min)
-    zoom = 10 if span < 1 else 8 if span < 5 else 6 if span < 10 else 4
+            if not monthly_risco.empty:
+                fig_temp = go.Figure()
+                fig_temp.add_trace(go.Scatter(
+                    x=monthly_risco['DataHora'].dt.to_period('M').astype(str),
+                    y=monthly_risco['RiscoFogo'],
+                    name='Risco de Fogo Mensal',
+                    mode='lines+markers+text',
+                    marker=dict(size=8, color='#FF4136', line=dict(width=1, color='#444')),
+                    line=dict(width=2, color='#FF4136'),
+                    text=[f'{v:.2f}' for v in monthly_risco['RiscoFogo']],
+                    textposition='top center'
+                ))
+                fig_temp.update_layout(
+                    title_text=f'Evolução Mensal do Risco de Fogo ({ano_selecionado_str})',
+                    xaxis_title='Mês',
+                    yaxis_title='Risco Médio de Fogo',
+                    height=400,
+                    margin=dict(l=60, r=80, t=80, b=40),
+                    showlegend=True,
+                    hovermode='x unified'
+                )
 
-    fig_map = px.scatter_mapbox(
-        df_plot,
-        lat='Latitude',
-        lon='Longitude',
-        color='RiscoFogo',
-        size='Precipitacao',
-        hover_name='mun_corrigido',
-        size_max=15,
-        color_continuous_scale=['#FFE5E5', '#FF4136'],
-        zoom=zoom,
-        center=centro
-    )
+    # --- Gráfico Top Municípios por Risco de Fogo ---
+    fig_risco = create_placeholder_fig(f"Top Municípios - Risco de Fogo ({ano_selecionado_str})")
+    if 'mun_corrigido' in df.columns and 'RiscoFogo' in df.columns:
+        df_risco_valido = df[df['RiscoFogo'].between(0, 1)] 
+        if not df_risco_valido.empty:
+            top_risco_data = df_risco_valido.groupby('mun_corrigido')['RiscoFogo'].mean().nlargest(10).sort_values()
+            if not top_risco_data.empty:
+                fig_risco = go.Figure(go.Bar(
+                    y=top_risco_data.index,
+                    x=top_risco_data.values,
+                    orientation='h',
+                    marker_color='#FF8C7A',
+                    text=top_risco_data.values,
+                    texttemplate='<b>%{text:.2f}</b>',
+                    textposition='outside'
+                ))
+                fig_risco.update_layout(
+                    title_text=f'Top Municípios por Risco Médio de Fogo ({ano_selecionado_str})',
+                    xaxis_title='Risco Médio de Fogo',
+                    yaxis_title='Município',
+                    height=400,
+                    margin=dict(l=100, r=80, t=50, b=40) 
+                )
 
-    fig_map.update_layout(
-        mapbox=dict(style='open-street-map'),
-        margin=dict(l=0, r=0, t=30, b=0),
-        coloraxis_showscale=False,
-        dragmode='pan',
-        hovermode='closest'
-    )
+    # --- Gráfico Top Municípios por Precipitação ---
+    fig_precip = create_placeholder_fig(f"Top Municípios - Precipitação Média ({ano_selecionado_str})")
+    if 'mun_corrigido' in df.columns and 'Precipitacao' in df.columns:
+        df_precip_valida = df[df['Precipitacao'] >= 0] 
+        if not df_precip_valida.empty:
+            top_precip_data = df_precip_valida.groupby('mun_corrigido')['Precipitacao'].mean().nlargest(10).sort_values()
+            if not top_precip_data.empty:
+                fig_precip = go.Figure(go.Bar(
+                    y=top_precip_data.index,
+                    x=top_precip_data.values,
+                    orientation='h',
+                    marker_color='#B3D9FF',
+                    text=top_precip_data.values,
+                    texttemplate='<b>%{text:.1f} mm</b>',
+                    textposition='outside'
+                ))
+                fig_precip.update_layout(
+                    title_text=f'Top Municípios por Precipitação Média ({ano_selecionado_str})',
+                    xaxis_title='Precipitação Média (mm)',
+                    yaxis_title='Município',
+                    height=400,
+                    margin=dict(l=100, r=80, t=50, b=40) 
+                )
 
-    fig_map.update_layout(clickmode='event+select')
+    # --- Mapa de Distribuição dos Focos de Calor ---
+    fig_map = create_placeholder_fig(f"Mapa de Distribuição dos Focos de Calor ({ano_selecionado_str})")
+    map_required_cols = ['Latitude', 'Longitude', 'RiscoFogo', 'mun_corrigido', 'DataHora']
+    if all(col in df.columns for col in map_required_cols):
+        df_map_plot = df[map_required_cols + (['Precipitacao'] if 'Precipitacao' in df.columns else [])].copy()
+        df_map_plot.dropna(subset=['Latitude', 'Longitude', 'RiscoFogo', 'mun_corrigido'], inplace=True)
+        df_map_plot = df_map_plot[df_map_plot['RiscoFogo'].between(0, 1)]
+        if 'Precipitacao' in df_map_plot.columns:
+            df_map_plot['Precipitacao'] = df_map_plot['Precipitacao'].fillna(0) 
+            df_map_plot = df_map_plot[df_map_plot['Precipitacao'] >= 0]
+        else:
+            df_map_plot['Precipitacao'] = 0 
+
+        if not df_map_plot.empty:
+            sample_size = 50000
+            if len(df_map_plot) > sample_size:
+                df_map_plot_sampled = df_map_plot.sample(sample_size, random_state=1)
+            else:
+                df_map_plot_sampled = df_map_plot
+
+            if not df_map_plot_sampled.empty:
+                centro_map = {
+                    'lat': df_map_plot_sampled['Latitude'].mean(),
+                    'lon': df_map_plot_sampled['Longitude'].mean()
+                }
+                lat_range = df_map_plot_sampled['Latitude'].max() - df_map_plot_sampled['Latitude'].min()
+                lon_range = df_map_plot_sampled['Longitude'].max() - df_map_plot_sampled['Longitude'].min()
+                max_range = max(lat_range, lon_range, 0.01) 
+                
+                zoom_level = 3.5
+                if max_range < 1: zoom_level = 7
+                elif max_range < 5: zoom_level = 5
+                elif max_range < 10: zoom_level = 4
+                
+                hover_data_config = {
+                    'Latitude': False, 'Longitude': False, 'DataHora': '|%d %b %Y',
+                    'RiscoFogo': ':.2f', 'Precipitacao': ':.1f mm'
+                }
+
+                fig_map = px.scatter_mapbox(
+                    df_map_plot_sampled,
+                    lat='Latitude',
+                    lon='Longitude',
+                    color='RiscoFogo',
+                    size='Precipitacao' if 'Precipitacao' in df_map_plot_sampled.columns else None,
+                    hover_name='mun_corrigido',
+                    hover_data=hover_data_config,
+                    color_continuous_scale=px.colors.sequential.YlOrRd,
+                    size_max=15,
+                    mapbox_style="open-street-map",
+                    zoom=zoom_level,
+                    center=centro_map,
+                    height=550 
+                )
+                fig_map.update_layout(
+                    title_text=f'Mapa de Distribuição dos Focos de Calor ({ano_selecionado_str})',
+                    margin={"r":0,"t":40,"l":0,"b":0},
+                    coloraxis_colorbar_title_text='Risco Fogo',
+                    legend_title_text='Precipitação (mm)' if 'Precipitacao' in df_map_plot_sampled.columns else ''
+                )
 
     return {
         'temporal': fig_temp,
@@ -1248,7 +1318,6 @@ def fig_desmatamento_mapa_pontos(gdf_alertas: gpd.GeoDataFrame, centro: dict) ->
 
     return fig
 
-
 gdf_alertas = carregar_shapefile(
     r"alertas.shp",
     calcular_percentuais=False
@@ -1518,8 +1587,83 @@ with tabs[1]:
         **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
         """)
 
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela de Impactos Sociais</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.</p>
+    </div>""", unsafe_allow_html=True)
+    
+    df_tabela_social = df_confmun.copy()
+    
+    if 'df_csv' in locals() and not df_csv.empty:
+        ocupacoes_por_municipio = df_csv.groupby('Município').size().reset_index(name='Ocupações_Retomadas')
+        df_tabela_social = df_tabela_social.merge(ocupacoes_por_municipio, left_on='Município', right_on='Município', how='left')
+        df_tabela_social['Ocupações_Retomadas'] = df_tabela_social['Ocupações_Retomadas'].fillna(0).astype(int)
+    else:
+        df_tabela_social['Ocupações_Retomadas'] = 0
+    
+    df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
+    
+    df_display = df_tabela_social.rename(columns={
+        'Município': 'Município',
+        'Total_Famílias': 'Famílias Afetadas',
+        'Número_Conflitos': 'Conflitos Registrados',
+        'Ocupações_Retomadas': 'Ocupações Retomadas'
+    })
+    
+    linha_total = pd.DataFrame({
+        'Município': ['TOTAL'],
+        'Famílias Afetadas': [df_display['Famílias Afetadas'].sum()],
+        'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()],
+        'Ocupações Retomadas': [df_display['Ocupações Retomadas'].sum()]
+    })
+    
+    df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
+    
+    def aplicar_cor_social(val, col):
+        if col == 'Município':
+            return 'background-color: #f0f0f0' if val == 'TOTAL' else ''
+        elif col == 'Famílias Afetadas':
+            return 'background-color: #ffebee; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #ffebee'
+        elif col == 'Conflitos Registrados':
+            return 'background-color: #fff3e0; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #fff3e0'
+        elif col == 'Ocupações Retomadas':
+            return 'background-color: #e8f5e8; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #e8f5e8'
+        return ''
+    
+    # Aplicar estilo
+    styled_df = df_display_com_total.style.apply(
+        lambda x: [aplicar_cor_social(val, col) for val, col in zip(x, df_display_com_total.columns)], 
+        axis=1
+    ).format({
+        'Famílias Afetadas': '{:,.0f}',
+        'Conflitos Registrados': '{:,.0f}',
+        'Ocupações Retomadas': '{:,.0f}'
+    })
+    
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    
+    st.caption("Tabela 3.1: Dados consolidados de impactos sociais por município.")
+    with st.expander("Detalhes e Fonte da Tabela 3.1"):
+        st.write("""
+        **Interpretação:**
+        A tabela apresenta os dados consolidados por município, incluindo:
+        - Número de famílias afetadas por conflitos
+        - Quantidade de conflitos registrados
+        - Número de ocupações retomadas
+
+        **Observações:**
+        - Valores absolutos por município
+        - Totais na última linha
+        - Células coloridas por tipo de dado
+        - Ordenação por número de famílias afetadas
+
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+        """)
+    st.divider()
+
 with tabs[2]:
     st.header("Processos Judiciais")
+    
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
         Esta análise apresenta dados sobre processos judiciais relacionados a questões ambientais, incluindo:
@@ -1527,53 +1671,311 @@ with tabs[2]:
         - Classes processuais
         - Assuntos
         - Órgãos julgadores
-
+        
         Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
         """)
-        st.markdown(
-            "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
-            unsafe_allow_html=True
-        )
-
+    
+    st.markdown(
+        "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
+        unsafe_allow_html=True
+    )
+    
+    try:
+        df_proc['data_ajuizamento'] = pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce')
+    except KeyError:
+        pass
+    except Exception:
+        pass
+    
+    try:
+        df_proc['ultima_atualizaçao'] = pd.to_datetime(df_proc['ultima_atualizaçao'], errors='coerce')
+    except KeyError:
+        pass
+    except Exception:
+        pass
+    
+    relevant_columns = [
+        'numero_processo',
+        'data_ajuizamento',
+        'municipio',
+        'classe',
+        'assuntos',
+        'orgao_julgador',
+        'ultima_atualizaçao'
+    ]
+    
+    existing_relevant_columns = [col for col in relevant_columns if col in df_proc.columns]
+    
+    if not existing_relevant_columns:
+        df_table_sorted = pd.DataFrame()
+        st.error("Não foi possível gerar a tabela de processos pois colunas essenciais não foram encontradas no DataFrame.")
+    else:
+        df_table_view = df_proc[existing_relevant_columns].copy()
+        
+        if 'data_ajuizamento' in df_table_view.columns and pd.api.types.is_datetime64_any_dtype(df_table_view['data_ajuizamento']):
+            sort_by_columns = ['data_ajuizamento', 'municipio']
+            if 'municipio' not in df_table_view.columns:
+                sort_by_columns = ['data_ajuizamento']
+            
+            df_table_sorted = df_table_view.sort_values(
+                by=sort_by_columns,
+                ascending=[False, True] if 'municipio' in sort_by_columns else [False]
+            )
+        else:
+            df_table_sorted = df_table_view
+    
     figs_j = fig_justica(df_proc)
-    key_map = {"Municípios": "mun", "Classes": "class", "Assuntos": "ass", "Órgãos": "org", "Temporal": "temp"}
-    barras = ["Municípios", "Classes", "Assuntos", "Órgãos"]
-
+    
     cols = st.columns(2, gap="large")
-    for idx, key in enumerate(barras):
-        col = cols[idx % 2]
-        chart_key = key_map[key]
-        col.markdown(f"""
-            <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
-                <h3 style="margin:0 0 .5rem 0;">{key}</h3>
-                <p style="margin:0;font-size:.95em;color:#666;">Distribuição por {key.lower()}.</p>
-            </div>
-        """, unsafe_allow_html=True)
-        col.plotly_chart(figs_j[chart_key].update_layout(height=350), use_container_width=True, key=f"jud_{chart_key}")
-        col.caption(f"Figura 4.{idx+1}: Distribuição por {key.lower()}.")
-        with col.expander(f"ℹ️ Detalhes e Fonte da Figura 4.{idx+1}", expanded=False):
-            st.write(f"""
-            **Interpretação:**
-            Distribuição dos processos por {key.lower()}.
-
-            **Fonte:** CNJ - Conselho Nacional de Justiça, 2025.
-            """)
-
-    st.markdown("""
-        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:1rem 0 .5rem 0;">
-            <h3 style="margin:0 0 .5rem 0;">Evolução Mensal de Processos</h3>
-            <p style="margin:0;font-size:.95em;color:#666;">Variação mensal ao longo do período.</p>
+    
+    with cols[0]:
+        st.markdown("""
+        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
+        <h3 style="margin:0 0 .5rem 0;">Top 10 Municípios</h3>
+        <p style="margin:0;font-size:.95em;color:#666;">Municípios com maior número de processos.</p>
         </div>
+        """, unsafe_allow_html=True)
+        
+        if 'mun' in figs_j and figs_j['mun'] is not None:
+            st.plotly_chart(figs_j['mun'].update_layout(height=400), use_container_width=True, key="jud_mun")
+        else:
+            st.warning("Gráfico de municípios não pôde ser gerado.")
+        
+        st.caption("Figura 4.1: Top 10 municípios com mais processos.")
+        with st.expander("ℹ️ Detalhes e Fonte da Figura 4.1", expanded=False):
+            st.write("""
+            **Interpretação:**
+            Distribuição dos processos por municípios.
+            
+            **Fonte:** CNJ - Conselho Nacional de Justiça.
+            """)
+    
+    with cols[1]:
+        st.markdown("""
+        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
+        <h3 style="margin:0 0 .5rem 0;">Classes Processuais</h3>
+        <p style="margin:0;font-size:.95em;color:#666;">Top 10 classes mais frequentes.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if 'class' in figs_j and figs_j['class'] is not None:
+            st.plotly_chart(figs_j['class'].update_layout(height=400), use_container_width=True, key="jud_class")
+        else:
+            st.warning("Gráfico de classes não pôde ser gerado.")
+        
+        st.caption("Figura 4.2: Top 10 classes processuais.")
+        with st.expander("ℹ️ Detalhes e Fonte da Figura 4.2", expanded=False):
+            st.write("""
+            **Interpretação:**
+            Distribuição dos processos por classes processuais.
+            
+            **Fonte:** CNJ - Conselho Nacional de Justiça.
+            """)
+    
+    cols2 = st.columns(2, gap="large")
+    
+    with cols2[0]:
+        st.markdown("""
+        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
+        <h3 style="margin:0 0 .5rem 0;">Assuntos</h3>
+        <p style="margin:0;font-size:.95em;color:#666;">Top 10 assuntos mais recorrentes.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if 'ass' in figs_j and figs_j['ass'] is not None:
+            st.plotly_chart(figs_j['ass'].update_layout(height=400), use_container_width=True, key="jud_ass")
+        else:
+            st.warning("Gráfico de assuntos não pôde ser gerado.")
+        
+        st.caption("Figura 4.3: Top 10 assuntos.")
+        with st.expander("ℹ️ Detalhes e Fonte da Figura 4.3", expanded=False):
+            st.write("""
+            **Interpretação:**
+            Distribuição dos processos por assuntos.
+            
+            **Fonte:** CNJ - Conselho Nacional de Justiça.
+            """)
+    
+    with cols2[1]:
+        st.markdown("""
+        <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
+        <h3 style="margin:0 0 .5rem 0;">Órgãos Julgadores</h3>
+        <p style="margin:0;font-size:.95em;color:#666;">Top 10 órgãos com mais processos.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if 'org' in figs_j and figs_j['org'] is not None:
+            st.plotly_chart(figs_j['org'].update_layout(height=400), use_container_width=True, key="jud_org")
+        else:
+            st.warning("Gráfico de órgãos julgadores não pôde ser gerado.")
+        
+        st.caption("Figura 4.4: Top 10 órgãos julgadores.")
+        with st.expander("ℹ️ Detalhes e Fonte da Figura 4.4", expanded=False):
+            st.write("""
+            **Interpretação:**
+            Distribuição dos processos por órgãos julgadores.
+            
+            **Fonte:** CNJ - Conselho Nacional de Justiça.
+            """)
+    
+    st.markdown("""
+    <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:1rem 0 .5rem 0;">
+    <h3 style="margin:0 0 .5rem 0;">Evolução Mensal de Processos</h3>
+    <p style="margin:0;font-size:.95em;color:#666;">Variação mensal ao longo do período.</p>
+    </div>
     """, unsafe_allow_html=True)
-    st.plotly_chart(figs_j[key_map["Temporal"]].update_layout(height=400), use_container_width=True, key="jud_temp")
+    
+    if 'temp' in figs_j and figs_j['temp'] is not None:
+        st.plotly_chart(figs_j['temp'], use_container_width=True, key="jud_temp")
+    else:
+        st.warning("Gráfico de evolução temporal não pôde ser gerado.")
+    
     st.caption("Figura 4.5: Evolução temporal dos processos judiciais.")
     with st.expander("ℹ️ Detalhes e Fonte da Figura 4.5", expanded=False):
         st.write("""
         **Interpretação:**
         Evolução mensal dos processos.
-
-        **Fonte:** CNJ - Conselho Nacional de Justiça, 2025.
+        
+        **Fonte:** CNJ - Conselho Nacional de Justiça.
         """)
+    st.markdown("""
+    <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:1rem 0 .5rem 0;">
+    <h3 style="margin:0 0 .5rem 0;">Análise Interativa de Processos</h3>
+    <p style="margin:0;font-size:.95em;color:#666;">Tabela com filtros para análise detalhada dos dados.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        tipo_analise = st.selectbox(
+            "Escolha o tipo de análise:",
+            ["Municípios com mais processos", "Órgãos mais atuantes", "Classes processuais mais frequentes", "Assuntos mais recorrentes", "Dados gerais relevantes"],
+            key="tipo_analise_proc"
+        )
+    
+    with col2:
+        if 'data_ajuizamento' in df_proc.columns:
+            df_proc['ano'] = pd.to_datetime(df_proc['data_ajuizamento'], errors='coerce').dt.year
+            anos_disponiveis = sorted([ano for ano in df_proc['ano'].dropna().unique() if not pd.isna(ano)])
+            if anos_disponiveis:
+                ano_selecionado = st.selectbox(
+                    "Filtrar por ano:",
+                    ["Todos os anos"] + anos_disponiveis,
+                    key="ano_filter_proc"
+                )
+            else:
+                ano_selecionado = "Todos os anos"
+        else:
+            ano_selecionado = "Todos os anos"
+    
+    df_filtrado = df_proc.copy()
+    if ano_selecionado != "Todos os anos":
+        df_filtrado = df_filtrado[df_filtrado['ano'] == ano_selecionado]
+    
+    if tipo_analise == "Municípios com mais processos":
+        df_filtrado['municipio'] = df_filtrado['municipio'].apply(clean_text)
+        tabela_resumo = df_filtrado.groupby('municipio').agg({
+            'numero_processo': 'count',
+            'data_ajuizamento': ['min', 'max']
+        }).round(2)
+        tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
+        tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(20)
+        tabela_resumo = tabela_resumo.reset_index()
+        
+        st.dataframe(tabela_resumo, use_container_width=True)
+        st.caption("Tabela 4.1: Top 20 municípios com mais processos judiciais.")
+        
+    elif tipo_analise == "Órgãos mais atuantes":
+        df_filtrado['orgao_julgador'] = df_filtrado['orgao_julgador'].apply(clean_text)
+        tabela_resumo = df_filtrado.groupby('orgao_julgador').agg({
+            'numero_processo': 'count',
+            'data_ajuizamento': ['min', 'max']
+        }).round(2)
+        tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
+        tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+        tabela_resumo = tabela_resumo.reset_index()
+        
+        st.dataframe(tabela_resumo, use_container_width=True)
+        st.caption("Tabela 4.1: Top 15 órgãos julgadores mais atuantes.")
+        
+    elif tipo_analise == "Classes processuais mais frequentes":
+        df_filtrado['classe'] = df_filtrado['classe'].apply(clean_text)
+        tabela_resumo = df_filtrado.groupby('classe').agg({
+            'numero_processo': 'count',
+            'data_ajuizamento': ['min', 'max']
+        }).round(2)
+        tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
+        tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+        tabela_resumo = tabela_resumo.reset_index()
+        
+        st.dataframe(tabela_resumo, use_container_width=True)
+        st.caption("Tabela 4.1: Top 15 classes processuais mais frequentes.")
+        
+    elif tipo_analise == "Assuntos mais recorrentes":
+        df_filtrado['assuntos'] = df_filtrado['assuntos'].apply(clean_text)
+        tabela_resumo = df_filtrado.groupby('assuntos').agg({
+            'numero_processo': 'count',
+            'data_ajuizamento': ['min', 'max']
+        }).round(2)
+        tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
+        tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+        tabela_resumo = tabela_resumo.reset_index()
+        
+        st.dataframe(tabela_resumo, use_container_width=True)
+        st.caption("Tabela 4.1: Top 15 assuntos mais recorrentes.")
+        
+    else:
+        colunas_relevantes = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador']
+        colunas_existentes = [col for col in colunas_relevantes if col in df_filtrado.columns]
+        
+        if colunas_existentes:
+            df_relevante = df_filtrado[colunas_existentes].copy()
+            
+            for col in ['municipio', 'classe', 'assuntos', 'orgao_julgador']:
+                if col in df_relevante.columns:
+                    df_relevante[col] = df_relevante[col].apply(clean_text)
+            
+            if 'data_ajuizamento' in df_relevante.columns:
+                df_relevante = df_relevante.sort_values('data_ajuizamento', ascending=False)
+            
+            st.dataframe(df_relevante.head(500), use_container_width=True)
+            st.caption("Tabela 4.1: Dados gerais relevantes dos processos judiciais (limitado a 500 registros).")
+        else:
+            st.info("Não foi possível carregar os dados relevantes.")
+    
+    with st.expander("ℹ️ Sobre esta tabela", expanded=False):
+        if tipo_analise == "Municípios com mais processos":
+            st.write("""
+            Esta tabela mostra os municípios com maior número de processos judiciais,
+            incluindo o total de processos e o período de atuação (primeiro e último processo).
+            """)
+        elif tipo_analise == "Órgãos mais atuantes":
+            st.write("""
+            Esta tabela apresenta os órgãos julgadores com maior volume de processos,
+            mostrando sua atividade ao longo do tempo.
+            """)
+        elif tipo_analise == "Classes processuais mais frequentes":
+            st.write("""
+            Esta tabela mostra as classes processuais mais utilizadas nos processos judiciais,
+            indicando os tipos de ações mais comuns no sistema judiciário.
+            """)
+        elif tipo_analise == "Assuntos mais recorrentes":
+            st.write("""
+            Esta tabela apresenta os assuntos mais frequentes nos processos judiciais,
+            revelando as principais questões levadas ao judiciário.
+            """)
+        else:
+            st.write("""
+            Esta tabela apresenta os dados gerais mais relevantes dos processos judiciais,
+            ordenados por data de ajuizamento (mais recentes primeiro).
+            Limitada a 500 registros para melhor performance.
+            """)
+    
+    st.markdown(
+        "**Fonte:** CNJ - Conselho Nacional de Justiça.",
+        unsafe_allow_html=True
+    )
 
 with tabs[3]:
     st.header("Focos de Calor")
@@ -1626,106 +2028,359 @@ with tabs[3]:
                     DiaSemChuva >= 0 AND
                     Latitude BETWEEN -15 AND 5 AND
                     Longitude BETWEEN -60 AND -45
-                    {'AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None else ''} -- Add year filter
+                    {'AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None and isinstance(year, int) else ''}
             """)
         full_query = " UNION ALL ".join(queries)
         df = conn.execute(full_query).fetchdf()
         df = df.dropna(subset=['DataHora'])
+        if 'mun_corrigido' in df.columns:
+            df = df.dropna(subset=['mun_corrigido'])
         return df
 
     @st.cache_data(show_spinner=False)
     def get_available_inpe_years(filepaths):
-         conn = duckdb.connect(database=':memory:')
-         queries = []
-         for path in filepaths:
-             queries.append(f"""
-                 SELECT DISTINCT extract(year from try_cast(DataHora as TIMESTAMP)) as year
-                 FROM read_csv_auto('{path}')
-                 WHERE try_cast(DataHora as TIMESTAMP) IS NOT NULL
-             """)
-         full_query = " UNION ALL ".join(queries)
-         years_df = conn.execute(full_query).fetchdf()
-         return sorted(years_df['year'].dropna().astype(int).unique())
+        conn = duckdb.connect(database=':memory:')
+        queries = []
+        for path in filepaths:
+            queries.append(f"""
+                SELECT DISTINCT extract(year from try_cast(DataHora as TIMESTAMP)) as year
+                FROM read_csv_auto('{path}')
+                WHERE try_cast(DataHora as TIMESTAMP) IS NOT NULL
+            """)
+        full_query = " UNION ALL ".join(queries)
+        years_df = conn.execute(full_query).fetchdf()
+        return sorted(years_df['year'].dropna().astype(int).unique())
 
-    anos = get_available_inpe_years(files)
-    ano_selecionado = st.selectbox('Selecione o ano para análise:', anos, index=len(anos) - 1)
+    anos_disponiveis_lista = get_available_inpe_years(files)
+    opcoes_ano_graficos = ["Todos os Anos"] + anos_disponiveis_lista
 
-    df_inpe = load_inpe_duckdb(files, year=ano_selecionado)
+    ano_selecionado_graficos_str = st.selectbox(
+        'Selecione o período para análise geral da aba (gráficos):',
+        opcoes_ano_graficos,
+        index=0,
+        key="ano_focos_calor_global_tab3_com_todos"
+    )
 
-    if not df_inpe.empty:
-        figs = graficos_inpe(df_inpe, ano_selecionado)
+    ano_param_load_graficos = None
+    display_periodo_graficos = "todo o período histórico"
+    if ano_selecionado_graficos_str != "Todos os Anos":
+        ano_param_load_graficos = int(ano_selecionado_graficos_str)
+        display_periodo_graficos = f"o ano de {ano_param_load_graficos}"
+
+    df_inpe_global_tab = load_inpe_duckdb(files, year=ano_param_load_graficos)
+
+    if not df_inpe_global_tab.empty:
+        figs_tab3 = graficos_inpe(df_inpe_global_tab, ano_selecionado_graficos_str)
 
         st.subheader("Evolução Temporal do Risco de Fogo")
-        st.plotly_chart(figs['temporal'], use_container_width=True)
-        st.caption(f"Figura 5.1: Evolução mensal do risco médio de fogo para o ano de {ano_selecionado}.")
-
-        with st.expander("Detalhes e Fonte da Figura 5.1"):
+        st.plotly_chart(figs_tab3['temporal'], use_container_width=True)
+        st.caption(f"Figura: Evolução mensal do risco médio de fogo para {display_periodo_graficos}.")
+        with st.expander("Detalhes e Fonte da Figura"):
             st.write(f"""
             **Interpretação:**
-            O gráfico mostra como o risco médio de fogo varia mês a mês em {ano_selecionado}, numa escala de 0 (mínimo) a 1 (máximo).
-
-            - **Pontos:** valores médios mensais.
-            - **Linha:** tendência ao longo do ano.
-
-            **Observação para {ano_selecionado}:**
+            O gráfico mostra como o risco médio de fogo varia mês a mês para {display_periodo_graficos}, numa escala de 0 (mínimo) a 1 (máximo).
+            Se "Todos os Anos" estiver selecionado, a interpretação pode variar dependendo da agregação feita no gráfico.
+            **Observação para {ano_selecionado_graficos_str if isinstance(ano_selecionado_graficos_str, int) else "anos específicos"}:**
             { {
                 2020: "Pico em agosto (0.94).",
                 2021: "Pico em julho (0.87).",
                 2022: "Pico em julho (0.83).",
                 2023: "Pico em agosto (0.69).",
                 2024: "Pico em setembro (0.96)."
-            }.get(ano_selecionado, "") }
-
+            }.get(ano_param_load_graficos, "Observações anuais específicas são mostradas ao selecionar um único ano.") }
             **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025.
             """)
 
-        col1, col2 = st.columns(2, gap="large")
-
-        with col1:
+        col1_graf_tab3, col2_graf_tab3 = st.columns(2, gap="large")
+        with col1_graf_tab3:
             st.subheader("Top Municípios por Risco Médio de Fogo")
-            st.plotly_chart(figs['top_risco'], use_container_width=True)
-            st.caption(f"Figura 5.2: Municípios com maior risco médio de fogo em {ano_selecionado}.")
-            with st.expander("Detalhes e Fonte da Figura 5.2"):
+            st.plotly_chart(figs_tab3['top_risco'], use_container_width=True)
+            st.caption(f"Figura: Municípios com maior risco médio de fogo para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
                 st.write(f"""
                 **Interpretação:**
-                Ranking dos municípios com maior risco médio de fogo em {ano_selecionado}.
-                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
-
+                Ranking dos municípios com maior risco médio de fogo para {display_periodo_graficos}.
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
                 **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
 
             st.subheader("Top Municípios por Precipitação Acumulada")
-            st.plotly_chart(figs['top_precip'], use_container_width=True)
-            st.caption(f"Figura 5.3: Municípios com maior precipitação acumulada em {ano_selecionado}.")
-            with st.expander("Detalhes e Fonte da Figura 5.3"):
+            st.plotly_chart(figs_tab3['top_precip'], use_container_width=True)
+            st.caption(f"Figura: Municípios com maior precipitação acumulada para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
                 st.write(f"""
                 **Interpretação:**
-                Ranking dos municípios com maior volume de chuva (mm) em {ano_selecionado}.
-                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
-
+                Ranking dos municípios com maior volume de chuva (mm) para {display_periodo_graficos}.
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
                 **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
-
-        with col2:
+        with col2_graf_tab3:
             st.subheader("Mapa de Distribuição dos Focos de Calor")
-            st.plotly_chart(
-                figs['mapa'],
-                use_container_width=True,
-                config={'scrollZoom': True}
-            )
-            st.caption(f"Figura 5.4: Distribuição espacial dos focos de calor em {ano_selecionado}.")
-            with st.expander("Detalhes e Fonte da Figura 5.4"):
+            st.plotly_chart(figs_tab3['mapa'], use_container_width=True, config={'scrollZoom': True})
+            st.caption(f"Figura: Distribuição espacial dos focos de calor para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
                 st.write(f"""
                 **Interpretação:**
-                Cada ponto representa um foco de calor detectado por satélite em {ano_selecionado}.
+                Cada ponto representa um foco de calor detectado por satélite para {display_periodo_graficos}.
                 Alta densidade indica maior atividade de queimadas.
-                {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
-
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
                 **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
     else:
-        st.warning(f"Nenhum dado de foco de calor encontrado para o ano de {ano_selecionado}.")
+        st.warning(f"Nenhum dado de foco de calor encontrado para a análise geral do período selecionado ({ano_selecionado_graficos_str}).")
 
+    st.divider()
+    st.header("Ranking de Municípios por Indicadores de Queimadas")
+    st.caption("Esta seção analisa os dados para classificar os municípios, considerando o maior valor do indicador para cada um deles.")
+
+    df_ranking_raw_all_years = load_inpe_duckdb(files, year=None)
+
+    if not df_ranking_raw_all_years.empty:
+        anos_disponiveis_ranking = get_available_inpe_years(files)
+        opcoes_ano_ranking = ["Todos os Anos"] + anos_disponiveis_ranking
+
+        col_filtro1, col_filtro2 = st.columns([1, 1])
+
+        with col_filtro1:
+            ano_selecionado_ranking = st.selectbox(
+                'Selecione o período para o ranking:',
+                opcoes_ano_ranking,
+                index=0,
+                key="ano_ranking_focos_calor"
+            )
+
+        with col_filtro2:
+            tema_ranking_all = st.selectbox(
+                "Selecione o indicador para o ranking:",
+                options=["Maior Risco de Fogo", "Maior Precipitação (evento)", "Máx. Dias Sem Chuva"],
+                key="selectbox_tema_ranking_melhorado"
+            )
+
+        if ano_selecionado_ranking == "Todos os Anos":
+            df_ranking_base_all = df_ranking_raw_all_years.copy()
+            periodo_display = "Todo o Período Histórico"
+        else:
+            ano_int = int(ano_selecionado_ranking)
+            df_ranking_base_all = load_inpe_duckdb(files, year=ano_int)
+            periodo_display = f"Ano de {ano_int}"
+
+        st.subheader(f"Ranking de Municípios por {tema_ranking_all} ({periodo_display})")
+
+        if not df_ranking_base_all.empty:
+            df_ranking_final_all = pd.DataFrame()
+            col_valor_tema_original_all = ""
+            col_valor_tema_renomeada_all = ""
+            col_data_tema_renomeada_all = "Data do Evento"
+
+            required_cols_all = ['mun_corrigido', 'DataHora']
+            if tema_ranking_all == "Maior Risco de Fogo":
+                required_cols_all.extend(['RiscoFogo', 'Precipitacao', 'DiaSemChuva'])
+                col_valor_tema_original_all = 'RiscoFogo'
+                col_valor_tema_renomeada_all = 'Risco de Fogo'
+            elif tema_ranking_all == "Maior Precipitação (evento)":
+                required_cols_all.extend(['Precipitacao', 'RiscoFogo', 'DiaSemChuva'])
+                col_valor_tema_original_all = 'Precipitacao'
+                col_valor_tema_renomeada_all = 'Precipitação (mm)'
+            elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                required_cols_all.extend(['DiaSemChuva', 'RiscoFogo', 'Precipitacao'])
+                col_valor_tema_original_all = 'DiaSemChuva'
+                col_valor_tema_renomeada_all = 'Dias Sem Chuva'
+
+            if all(col in df_ranking_base_all.columns for col in required_cols_all):
+                df_temp_ranking_all = df_ranking_base_all.dropna(subset=['mun_corrigido', col_valor_tema_original_all])
+
+                if not df_temp_ranking_all.empty:
+                    idx_all = df_temp_ranking_all.loc[df_temp_ranking_all.groupby('mun_corrigido', dropna=False)[col_valor_tema_original_all].idxmax()]
+
+                    cols_para_selecionar_de_idx = ['mun_corrigido', 'DataHora', 'RiscoFogo', 'Precipitacao', 'DiaSemChuva']
+                    df_ranking_final_all = idx_all[cols_para_selecionar_de_idx].copy()
+
+                    df_ranking_final_all['Ano'] = df_ranking_final_all['DataHora'].dt.year
+                    df_ranking_final_all['Mês'] = df_ranking_final_all['DataHora'].dt.strftime('%B')
+
+                    freq_municipios = df_temp_ranking_all['mun_corrigido'].value_counts()
+                    df_ranking_final_all['Total_Registros'] = df_ranking_final_all['mun_corrigido'].map(freq_municipios)
+
+                    rename_dict = {
+                        'mun_corrigido': 'Município',
+                        'DataHora': col_data_tema_renomeada_all,
+                        'Total_Registros': 'Total de Registros'
+                    }
+
+                    ordenacao_col = ""
+                    if tema_ranking_all == "Maior Risco de Fogo":
+                        rename_dict.update({
+                            'RiscoFogo': col_valor_tema_renomeada_all,
+                            'Precipitacao': 'Precipitação (mm)',
+                            'DiaSemChuva': 'Dias Sem Chuva'
+                        })
+                        ordenacao_col = col_valor_tema_renomeada_all
+                    elif tema_ranking_all == "Maior Precipitação (evento)":
+                        rename_dict.update({
+                            'Precipitacao': col_valor_tema_renomeada_all,
+                            'RiscoFogo': 'Risco de Fogo',
+                            'DiaSemChuva': 'Dias Sem Chuva'
+                        })
+                        ordenacao_col = col_valor_tema_renomeada_all
+                    elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                        rename_dict.update({
+                            'DiaSemChuva': col_valor_tema_renomeada_all,
+                            'RiscoFogo': 'Risco de Fogo',
+                            'Precipitacao': 'Precipitação (mm)'
+                        })
+                        ordenacao_col = col_valor_tema_renomeada_all
+
+                    df_ranking_final_all.rename(columns=rename_dict, inplace=True)
+
+                    df_ranking_final_all = df_ranking_final_all.sort_values(
+                        by=[ordenacao_col, 'Total de Registros'],
+                        ascending=[False, False]
+                    ).reset_index(drop=True)
+
+                    df_ranking_final_all['Posição'] = range(1, len(df_ranking_final_all) + 1)
+
+                    cols_order = ['Posição', 'Município', ordenacao_col, col_data_tema_renomeada_all, 'Ano', 'Mês']
+
+                    if tema_ranking_all == "Maior Risco de Fogo":
+                        cols_order.extend(['Precipitação (mm)', 'Dias Sem Chuva'])
+                    elif tema_ranking_all == "Maior Precipitação (evento)":
+                        cols_order.extend(['Risco de Fogo', 'Dias Sem Chuva'])
+                    elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                        cols_order.extend(['Risco de Fogo', 'Precipitação (mm)'])
+
+                    cols_order.append('Total de Registros')
+                    cols_order = [col for col in cols_order if col in df_ranking_final_all.columns]
+                    df_ranking_final_all = df_ranking_final_all[cols_order]
+
+                    column_config_ranking_all = {
+                        "Posição": st.column_config.NumberColumn("Pos.", width="small"),
+                        "Município": st.column_config.TextColumn("Município", width="medium"),
+                        col_data_tema_renomeada_all: st.column_config.DatetimeColumn(
+                            "Data do Evento",
+                            format="DD/MM/YYYY HH:mm",
+                            width="medium"
+                        ),
+                        "Ano": st.column_config.NumberColumn("Ano", format="%d", width="small"),
+                        "Mês": st.column_config.TextColumn("Mês", width="small"),
+                        "Total de Registros": st.column_config.NumberColumn("Total Registros", format="%d", width="small")
+                    }
+
+                    if ordenacao_col:
+                        if tema_ranking_all == "Maior Risco de Fogo":
+                            column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                "Risco de Fogo", format="%.3f", width="small"
+                            )
+                            if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                    "Precip. (mm)", format="%.1f", width="small"
+                                )
+                            if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                    "Dias S/Chuva", format="%d", width="small"
+                                )
+                        elif tema_ranking_all == "Maior Precipitação (evento)":
+                            column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                "Precipitação (mm)", format="%.1f", width="small"
+                            )
+                            if "Risco de Fogo" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                    "Risco Fogo", format="%.3f", width="small"
+                                )
+                            if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                    "Dias S/Chuva", format="%d", width="small"
+                                )
+                        elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                            column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                "Dias Sem Chuva", format="%d", width="small"
+                            )
+                            if "Risco de Fogo" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                    "Risco Fogo", format="%.3f", width="small"
+                                )
+                            if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                    "Precip. (mm)", format="%.1f", width="small"
+                                )
+
+                    col_met1, col_met2, col_met3, col_met4 = st.columns(4)
+
+                    with col_met1:
+                        total_municipios = len(df_ranking_final_all)
+                        st.metric("Total de Municípios", f"{total_municipios:,}")
+
+                    with col_met2:
+                        if ordenacao_col and ordenacao_col in df_ranking_final_all.columns:
+                            valor_max = df_ranking_final_all[ordenacao_col].max()
+                            if tema_ranking_all == "Maior Risco de Fogo":
+                                st.metric("Maior Risco", f"{valor_max:.3f}")
+                            elif tema_ranking_all == "Maior Precipitação (evento)":
+                                st.metric("Maior Precipitação", f"{valor_max:.1f} mm")
+                            else:
+                                st.metric("Máx. Dias S/Chuva", f"{int(valor_max)} dias")
+                        else:
+                            st.metric("Indicador Principal", "N/A")
+
+                    with col_met3:
+                        if not df_ranking_final_all.empty:
+                            municipio_lider = df_ranking_final_all.iloc[0]['Município']
+                            st.metric("Município Líder", municipio_lider)
+                        else:
+                            st.metric("Município Líder", "N/A")
+
+                    with col_met4:
+                        if ano_selecionado_ranking != "Todos os Anos":
+                            if 'Ano' in df_ranking_final_all.columns and not df_ranking_final_all['Ano'].empty:
+                                ano_mais_comum = df_ranking_final_all['Ano'].mode().iloc[0]
+                                st.metric("Ano Predominante", f"{int(ano_mais_comum)}")
+                            else:
+                                st.metric("Ano Predominante", "N/A")
+                        else:
+                            if 'Total de Registros' in df_ranking_final_all.columns:
+                                total_registros = df_ranking_final_all['Total de Registros'].sum()
+                                st.metric("Total de Registros", f"{total_registros:,}")
+                            else:
+                                st.metric("Total de Registros", "N/A")
+
+
+                    st.dataframe(
+                        df_ranking_final_all,
+                        use_container_width=True,
+                        column_config=column_config_ranking_all,
+                        hide_index=True,
+                        height=400
+                    )
+
+                    with st.expander("ℹ️ Informações sobre o Ranking"):
+                        st.write(f"""
+                        **Como interpretar este ranking:**
+
+                        - **Critério de Classificação:** {tema_ranking_all} registrado para cada município
+                        - **Período Analisado:** {periodo_display}
+                        - **Metodologia:** Para cada município, foi selecionado o registro com o maior valor do indicador escolhido
+                        - **Desempate:** Em caso de valores iguais, municípios com mais registros totais ficam em posição superior
+                        - **Informações Contextuais:** Data do evento, ano, mês e outros indicadores do mesmo registro
+
+                        **Colunas da Tabela:**
+                        - **Posição:** Classificação no ranking
+                        - **Município:** Nome do município
+                        - **{ordenacao_col if ordenacao_col else "Indicador Principal"}:** Valor máximo do indicador selecionado
+                        - **Data do Evento:** Quando o valor máximo foi registrado
+                        - **Total de Registros:** Quantidade total de registros do município no período
+                        - **Informações Contextuais:** Outros indicadores do mesmo registro (risco, precipitação, dias sem chuva)
+
+                        **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
+                        """)
+
+                else:
+                    st.info(f"Não há dados válidos para gerar o ranking de '{tema_ranking_all}' no período selecionado.")
+            else:
+                st.warning(f"Colunas necessárias não encontradas para gerar o ranking de '{tema_ranking_all}'. Verifique se {required_cols_all} estão presentes em df_ranking_base_all.")
+        else:
+            st.warning(f"Nenhum dado encontrado para o período selecionado ({ano_selecionado_ranking}).")
+    else:
+        st.warning("Nenhum dado de foco de calor encontrado para a seção de ranking.")
+        
 with tabs[4]:
     st.header("Desmatamento")
 
@@ -1747,12 +2402,12 @@ with tabs[4]:
     st.write("**Filtro Global:**")
     anos_disponiveis = ['Todos'] + sorted(gdf_alertas['ANODETEC'].unique().tolist())
     ano_global_selecionado = st.selectbox('Ano de Detecção:', anos_disponiveis, key="filtro_ano_global")
-    
+
     if ano_global_selecionado != 'Todos':
         gdf_alertas_filtrado = gdf_alertas[gdf_alertas['ANODETEC'] == ano_global_selecionado].copy()
     else:
         gdf_alertas_filtrado = gdf_alertas.copy()
-    
+
     st.divider()
 
     col_charts, col_map = st.columns([2, 3], gap="large")
@@ -1810,14 +2465,14 @@ with tabs[4]:
         if not gdf_alertas_filtrado.empty:
             minx, miny, maxx, maxy = gdf_alertas_filtrado.total_bounds
             centro = {'lat': (miny + maxy) / 2, 'lon': (minx + maxx) / 2}
-            
+
             fig_desmat_map_pts = fig_desmatamento_mapa_pontos(gdf_alertas_filtrado, centro)
             if fig_desmat_map_pts.data:
                 st.subheader("Mapa de Alertas")
                 st.plotly_chart(
                     fig_desmat_map_pts,
                     use_container_width=True,
-                    height=850,  
+                    height=850,
                     config={'scrollZoom': True},
                     key="desmat_mapa_pontos_chart"
                 )
@@ -1846,36 +2501,35 @@ with tabs[4]:
                 'AREAHA': ['sum', 'count', 'mean'],
                 'ANODETEC': ['min', 'max'],
                 'BIOMA': lambda x: x.mode().iloc[0] if not x.empty else 'N/A',
-                'FONTE': lambda x: ', '.join(x.unique()),
                 'VPRESSAO': lambda x: x.mode().iloc[0] if not x.empty and x.mode().size > 0 else 'N/A'
             }).round(2)
-            
-            ranking_municipios.columns = ['Área Total (ha)', 'Qtd Alertas', 'Área Média (ha)', 
-                                        'Ano Min', 'Ano Max', 'Bioma Principal', 'Fontes', 'Vetor Pressão']
-        
+
+            ranking_municipios.columns = ['Área Total (ha)', 'Qtd Alertas', 'Área Média (ha)',
+                                          'Ano Min', 'Ano Max', 'Bioma Principal', 'Vetor Pressão'] # 'Fontes' removido daqui
+
             ranking_municipios = ranking_municipios.reset_index()
-            
+
             ranking_municipios = ranking_municipios.sort_values('Área Total (ha)', ascending=False)
-            
+
             ranking_municipios.insert(0, 'Posição', range(1, len(ranking_municipios) + 1))
-            
+
             ranking_municipios['Área Total (ha)'] = ranking_municipios['Área Total (ha)'].apply(lambda x: f"{x:,.2f}")
             ranking_municipios['Área Média (ha)'] = ranking_municipios['Área Média (ha)'].apply(lambda x: f"{x:.2f}")
-            
+
             st.dataframe(
-                ranking_municipios.head(10), 
-                use_container_width=True, 
+                ranking_municipios.head(10),
+                use_container_width=True,
                 hide_index=True,
                 height=400
             )
-            
+
             st.caption("Tabela 6.1: Ranking dos municípios com maior área de alertas de desmatamento (Top 10).")
-            
+
             with st.expander("Detalhes da Tabela 6.1 e Informações das Colunas"):
                 st.write("""
-                **Interpretação:**  
+                **Interpretação:**
                 Ranking dos municípios ordenados pela área total de alertas de desmatamento detectados, com informações complementares sobre quantidade de alertas, período e características predominantes.
-                
+
                 **Informações das Colunas:**
                 - **Posição**: Ranking baseado na área total de desmatamento
                 - **Estado**: Estado onde se localiza o município
@@ -1885,15 +2539,14 @@ with tabs[4]:
                 - **Área Média (ha)**: Área média por alerta no município
                 - **Ano Min/Max**: Período de detecção dos alertas (primeiro e último ano)
                 - **Bioma Principal**: Bioma mais frequente nos alertas do município
-                - **Fontes**: Sistemas de detecção dos alertas (DETER, SAD, GLAD)
                 - **Vetor Pressão**: Principal vetor de pressão detectado nos alertas
-                
+
                 **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
-                """)
+                """) 
         else:
             st.info("Dados não disponíveis para o ranking")
 
-    st.divider() 
+    st.divider()
 
     if not gdf_alertas.empty:
         fig_desmat_temp = fig_desmatamento_temporal(gdf_alertas)
@@ -1916,4 +2569,4 @@ with tabs[4]:
         else:
             st.info("Dados de alertas de desmatamento não contêm informações temporais válidas.")
     else:
-        st.warning("Dados de Alertas de Desmatamento não disponíveis para esta análise.")     
+        st.warning("Dados de Alertas de Desmatamento não disponíveis para esta análise.")
