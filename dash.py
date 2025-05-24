@@ -653,18 +653,13 @@ def fig_ocupacoes(df_csv: pd.DataFrame) -> go.Figure:
         font=dict(color='FireBrick', size=10)
     )
     fig.update_layout(
-        yaxis=dict(
-            categoryorder='array',
-            categoryarray=df['Mun_wrap'][::-1]
-        )
-    )
-    fig = _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
-    fig.update_layout(
         height=450,
         margin=dict(l=150, r=20, t=60, b=20)
     )
-
-    return fig
+    fig.update_yaxes(
+        categoryorder='total ascending' 
+    )
+    return _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
 
 def fig_familias(df_conflitos: pd.DataFrame) -> go.Figure:
     df = df_conflitos.sort_values('Total_Famílias', ascending=False)
@@ -1009,6 +1004,251 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
     st.subheader("Tabela Área")
     st.markdown(styled.to_html(), unsafe_allow_html=True)
 
+def fig_desmatamento_uc(gdf_cnuc: gpd.GeoDataFrame, gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
+
+    if gdf_cnuc.empty or gdf_alertas.empty:
+        return go.Figure() 
+
+    crs_proj = "EPSG:31983" 
+    gdf_cnuc_proj = gdf_cnuc.to_crs(crs_proj)
+    gdf_alertas_proj = gdf_alertas.to_crs(crs_proj)
+
+    alerts_in_ucs = gpd.sjoin(gdf_alertas_proj, gdf_cnuc_proj, how="inner", predicate="intersects")
+
+    if alerts_in_ucs.empty:
+         return go.Figure() 
+
+    # Using correct column name: 'AREAHA'
+    alert_area_per_uc = alerts_in_ucs.groupby('nome_uc')['AREAHA'].sum().reset_index()
+    alert_area_per_uc.columns = ['nome_uc', 'alerta_ha_total'] # Rename for clarity
+
+    alert_area_per_uc = alert_area_per_uc.sort_values('alerta_ha_total', ascending=False)
+
+    alert_area_per_uc['uc_wrap'] = alert_area_per_uc['nome_uc'].apply(lambda x: wrap_label(x, 15)) # Use 15 width like other UC charts
+
+    fig = px.bar(
+        alert_area_per_uc,
+        x='uc_wrap',
+        y='alerta_ha_total',
+        labels={"alerta_ha_total":"Área de Alertas (ha)","uc_wrap":"UC"},
+        text_auto=True,
+    )
+
+    fig.update_traces(
+        customdata=np.stack([alert_area_per_uc.alerta_ha_total, alert_area_per_uc.nome_uc], axis=-1),
+        hovertemplate=(
+            "<b>%{customdata[1]}</b><br>"
+            "Área de Alertas: %{customdata[0]:,.0f} ha<extra></extra>" # Format with comma separator
+        ),
+        texttemplate="%{y:,.0f}", 
+        textposition="outside", 
+        marker_line_color="rgb(80,80,80)",
+        marker_line_width=0.5,
+    )
+
+    media = alert_area_per_uc["alerta_ha_total"].mean()
+    fig.add_shape(
+        type="line", x0=-0.5, x1=len(alert_area_per_uc["uc_wrap"])-0.5,
+        y0=media, y1=media,
+        line=dict(color="FireBrick", width=2, dash="dash"),
+    )
+    fig.add_annotation(
+        x=len(alert_area_per_uc["uc_wrap"])-0.5, y=media,
+        text=f"Média = {media:,.0f} ha", 
+        showarrow=False, yshift=10,
+        font=dict(color="FireBrick", size=10)
+    )
+
+    fig.update_xaxes(tickangle=0, tickfont=dict(size=9), title_text="")
+    fig.update_yaxes(title_text="Área (ha)", tickfont=dict(size=9))
+    fig.update_layout(height=400) 
+
+    fig = _apply_layout(fig, title="Área de Alertas (Desmatamento) por UC", title_size=16)
+
+    return fig
+
+def fig_desmatamento_temporal(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
+    """Cria um gráfico de linha mostrando a evolução temporal da área de alertas de desmatamento."""
+    if gdf_alertas.empty or 'DATADETEC' not in gdf_alertas.columns:
+        fig = go.Figure()
+        fig.update_layout(title="Evolução Temporal de Alertas (Desmatamento)",
+                          xaxis_title="Data", yaxis_title="Área (ha)")
+        return _apply_layout(fig, title="Evolução Temporal de Alertas (Desmatamento)", title_size=16)
+
+    gdf_alertas['DATADETEC'] = pd.to_datetime(gdf_alertas['DATADETEC'], errors='coerce')
+    df_valid_dates = gdf_alertas.dropna(subset=['DATADETEC', 'AREAHA'])
+
+    if df_valid_dates.empty:
+         fig = go.Figure()
+         fig.update_layout(title="Evolução Temporal de Alertas (Desmatamento)",
+                          xaxis_title="Data", yaxis_title="Área (ha)")
+         return _apply_layout(fig, title="Evolução Temporal de Alertas (Desmatamento)", title_size=16)
+
+
+    # Group by month and sum area
+    df_monthly = df_valid_dates.set_index('DATADETEC').resample('ME')['AREAHA'].sum().reset_index()
+    df_monthly['DATADETEC'] = df_monthly['DATADETEC'].dt.to_period('M').astype(str)
+
+    fig = px.line(
+        df_monthly,
+        x='DATADETEC',
+        y='AREAHA',
+        labels={"AREAHA":"Área (ha)","DATADETEC":"Mês/Ano"},
+        markers=True,
+        text='AREAHA'
+    )
+
+    fig.update_traces(
+        mode='lines+markers+text',
+        textposition='top center',
+        texttemplate='%{text:,.0f}', # Corrected syntax
+        hovertemplate=(
+            "Mês/Ano: %{x}<br>"
+            "Área de Alertas: %{y:,.0f} ha<extra></extra>"
+        )
+    )
+
+    fig.update_xaxes(title_text="Mês/Ano", tickangle=45)
+    fig.update_yaxes(title_text="Área (ha)")
+    fig.update_layout(height=400)
+
+    fig = _apply_layout(fig, title="Evolução Mensal de Alertas (Desmatamento)", title_size=16)
+
+    return fig
+
+def fig_desmatamento_municipio(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
+    """Cria um gráfico de barras mostrando a área total de alertas de desmatamento por município."""
+
+    if gdf_alertas.empty or 'MUNICIPIO' not in gdf_alertas.columns or 'AREAHA' not in gdf_alertas.columns:
+        fig = go.Figure()
+        fig.update_layout(title="Área de Alertas (Desmatamento) por Município",
+                          xaxis_title="Área (ha)", yaxis_title="Município")
+        return _apply_layout(fig, title="Área de Alertas (Desmatamento) por Município", title_size=16)
+
+    df_mun = gdf_alertas.groupby('MUNICIPIO')['AREAHA'].sum().reset_index()
+    df_mun.columns = ['municipio', 'alerta_ha_total']
+
+    df_mun = df_mun[df_mun['alerta_ha_total'] > 0].sort_values('alerta_ha_total', ascending=False).head(10) # Top 10
+
+    if df_mun.empty:
+         fig = go.Figure()
+         fig.update_layout(title="Área de Alertas (Desmatamento) por Município",
+                          xaxis_title="Área (ha)", yaxis_title="Município")
+         return _apply_layout(fig, title="Área de Alertas (Desmatamento) por Município", title_size=16)
+
+    df_mun['mun_wrap'] = df_mun['municipio'].apply(lambda x: wrap_label(x, 20)) # Use 20 width like CPT charts
+
+    fig = px.bar(
+        df_mun,
+        x='alerta_ha_total',
+        y='mun_wrap',
+        orientation='h',
+        labels={"alerta_ha_total":"Área de Alertas (ha)","mun_wrap":"Município"},
+        text='alerta_ha_total'
+    )
+
+    fig.update_traces(
+        texttemplate='%{text:,.0f}',
+        textposition='outside',
+        cliponaxis=False,
+        marker_line_color="rgb(80,80,80)",
+        marker_line_width=0.5,
+        hovertemplate=(
+            "Município: %{y}<br>"
+            "Área de Alertas: %{x:,.0f} ha<extra></extra>"
+        )
+    )
+
+    # Add mean line
+    media = df_mun["alerta_ha_total"].mean()
+    fig.add_shape(
+        type="line", x0=media, x1=media,
+        yref='paper', y0=0, y1=1,
+        line=dict(color="FireBrick", width=2, dash="dash"),
+    )
+    fig.add_annotation(
+        x=media, y=1.02,
+        xref='x', yref='paper',
+        text=f"Média = {media:,.0f} ha", # Format mean text
+        showarrow=False,
+        font=dict(color="FireBrick", size=10)
+    )
+
+    fig.update_xaxes(title_text="Área (ha)")
+    fig.update_yaxes(title_text="", autorange="reversed") # Reverse y-axis for horizontal bar chart
+    fig.update_layout(height=400, margin=dict(l=150, r=20, t=60, b=20)) # Adjust margins
+
+    fig = _apply_layout(fig, title="Top 10 Municípios com Mais Alertas (Desmatamento)", title_size=16)
+
+    return fig
+
+def fig_desmatamento_mapa_pontos(gdf_alertas: gpd.GeoDataFrame, centro: dict) -> go.Figure:
+    """Cria um mapa de dispersão dos alertas de desmatamento."""
+    if gdf_alertas.empty or 'AREAHA' not in gdf_alertas.columns or 'geometry' not in gdf_alertas.columns:
+        fig = go.Figure()
+        fig.update_layout(title="Mapa de Alertas (Desmatamento)")
+        return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
+
+    gdf_map = gdf_alertas.to_crs("EPSG:4326").copy()
+
+    gdf_map['Latitude'] = gdf_map.geometry.centroid.y
+    gdf_map['Longitude'] = gdf_map.geometry.centroid.x
+    gdf_map = gdf_map.dropna(subset=['Latitude', 'Longitude', 'AREAHA'])
+
+    if gdf_map.empty:
+        fig = go.Figure()
+        fig.update_layout(title="Mapa de Alertas (Desmatamento)")
+        return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
+
+    minx, miny, maxx, maxy = gdf_map.total_bounds
+    center = {'lat': (miny + maxy) / 2, 'lon': (minx + maxx) / 2}
+    span_lat = maxy - miny
+    span_lon = maxx - minx
+    zoom = 3 
+    if span_lat < 10 and span_lon < 10: zoom = 5
+    if span_lat < 5 and span_lon < 5: zoom = 7
+    if span_lat < 1 and span_lon < 1: zoom = 9
+
+    fig = px.scatter_mapbox(
+        gdf_map,
+        lat='Latitude',
+        lon='Longitude',
+        size='AREAHA', 
+        color='AREAHA',
+        color_continuous_scale="Viridis",
+        range_color=(0, gdf_map['AREAHA'].quantile(0.95)), 
+        hover_name='CODEALERTA', 
+        hover_data={
+            'AREAHA': ':.2f', 
+            'MUNICIPIO': True, 
+            'DATADETEC': True if 'DATADETEC' in gdf_map.columns else False, 
+            'Latitude': False, 
+            'Longitude': False 
+        },
+        size_max=15, 
+        zoom=zoom,
+        center=center,
+        opacity=0.7 
+    )
+    
+    fig.update_traces(showlegend=False)
+    fig.update_coloraxes(showscale=False)
+    
+    fig.update_layout(
+        mapbox=dict(
+            style='open-street-map',
+            zoom=zoom,
+            center=center
+        ),
+        margin={"r":0,"t":0,"l":0,"b":0},
+        hovermode='closest'
+    )
+
+    fig = _apply_layout(fig, title="Distribuição Espacial de Alertas (Desmatamento)", title_size=16)
+
+    return fig
+
+
 gdf_alertas = carregar_shapefile(
     r"alertas.shp",
     calcular_percentuais=False
@@ -1056,7 +1296,7 @@ with tabs[0]:
         Os dados são provenientes do CNUC (Cadastro Nacional de Unidades de Conservação) e SIGEF (Sistema de Gestão Fundiária).
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** MMA - Ministério do Meio Ambiente. Cadastro Nacional de Unidades de Conservação. Brasília: MMA.", 
+            "**Fonte Geral da Seção:** MMA - Ministério do Meio Ambiente. Cadastro Nacional de Unidades de Conservação. Brasília: MMA.",
             unsafe_allow_html=True
         )
 
@@ -1114,7 +1354,7 @@ with tabs[0]:
         st.caption("Figura 1.1: Distribuição espacial das unidades de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.1"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             O mapa mostra a distribuição espacial das unidades de conservação na região, destacando as áreas com sobreposições selecionadas.
 
             **Observações:**
@@ -1135,7 +1375,7 @@ with tabs[0]:
         st.caption("Figura 1.2: Comparação entre área do CAR e área restante da UC.")
         with st.expander("Detalhes e Fonte da Figura 1.2"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             Este gráfico mostra a proporção entre a área cadastrada no CAR e a área restante da Unidade de Conservação (UC).
 
             **Observações:**
@@ -1152,7 +1392,7 @@ with tabs[0]:
         st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             O gráfico apresenta a área em hectares de cada unidade de conservação, permitindo comparar suas extensões territoriais.
 
             **Observações:**
@@ -1168,7 +1408,7 @@ with tabs[0]:
         st.caption("Figura 1.4: Contagem de sobreposições por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.4"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             O gráfico mostra o número de alertas e CARs sobrepostos a cada unidade de conservação.
 
             **Observações:**
@@ -1187,7 +1427,7 @@ with tabs[0]:
     st.caption("Tabela 1.1: Dados consolidados por município.")
     with st.expander("Detalhes e Fonte da Tabela 1.1"):
         st.write("""
-        **Interpretação:**  
+        **Interpretação:**
         A tabela apresenta os dados consolidados por município, incluindo:
         - Área de alertas em hectares
         - Área do SIGEF em hectares
@@ -1208,13 +1448,13 @@ with tabs[1]:
         st.write("""
         Esta análise apresenta dados sobre impactos sociais relacionados a conflitos agrários, incluindo:
         - Famílias afetadas
-        - Conflitos registrados 
+        - Conflitos registrados
         - Ocupações retomadas
 
         Os dados são provenientes da Comissão Pastoral da Terra (CPT).
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.", 
+            "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.",
             unsafe_allow_html=True
         )
 
@@ -1228,7 +1468,7 @@ with tabs[1]:
         st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
         with st.expander("Detalhes e Fonte da Figura 3.1"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
 
             **Observações:**
@@ -1248,7 +1488,7 @@ with tabs[1]:
         st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
         with st.expander("Detalhes e Fonte da Figura 3.2"):
             st.write("""
-            **Interpretação:**  
+            **Interpretação:**
             O gráfico mostra o número total de conflitos agrários registrados em cada município.
 
             **Observações:**
@@ -1267,7 +1507,7 @@ with tabs[1]:
     st.caption("Figura 3.3: Distribuição de ocupações retomadas por município.")
     with st.expander("Detalhes e Fonte da Figura 3.3"):
         st.write("""
-        **Interpretação:**  
+        **Interpretação:**
         O gráfico apresenta o número de áreas onde houve processos de retomada de ocupações por município.
 
         **Observações:**
@@ -1287,11 +1527,11 @@ with tabs[2]:
         - Classes processuais
         - Assuntos
         - Órgãos julgadores
-        
+
         Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
         """)
         st.markdown(
-            "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
+            "**Fonte Geral da Seção:** TJPA - Tribunal de Justiça do Estado do Pará. Processos Judiciais Ambientais. Belém: TJPA.",
             unsafe_allow_html=True
         )
 
@@ -1313,7 +1553,7 @@ with tabs[2]:
         col.caption(f"Figura 4.{idx+1}: Distribuição por {key.lower()}.")
         with col.expander(f"ℹ️ Detalhes e Fonte da Figura 4.{idx+1}", expanded=False):
             st.write(f"""
-            **Interpretação:**  
+            **Interpretação:**
             Distribuição dos processos por {key.lower()}.
 
             **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
@@ -1329,7 +1569,7 @@ with tabs[2]:
     st.caption("Figura 4.5: Evolução temporal dos processos judiciais.")
     with st.expander("ℹ️ Detalhes e Fonte da Figura 4.5", expanded=False):
         st.write("""
-        **Interpretação:**  
+        **Interpretação:**
         Evolução mensal dos processos.
 
         **Fonte:** TJPA – Tribunal de Justiça do Estado do Pará, 2025.
@@ -1342,7 +1582,7 @@ with tabs[3]:
         st.write("""
         Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:
         - Risco de fogo
-        - Precipitação acumulada  
+        - Precipitação acumulada
         - Distribuição espacial
 
         Os dados são provenientes do Programa Queimadas do INPE.
@@ -1366,12 +1606,12 @@ with tabs[3]:
     ]
 
     @st.cache_data(show_spinner=False)
-    def load_inpe_duckdb(filepaths):
+    def load_inpe_duckdb(filepaths, year=None):
         conn = duckdb.connect(database=':memory:')
         queries = []
         for path in filepaths:
             queries.append(f"""
-                SELECT 
+                SELECT
                     try_cast(DataHora as TIMESTAMP) AS DataHora,
                     try_cast(RiscoFogo AS DOUBLE) AS RiscoFogo,
                     try_cast(Precipitacao AS DOUBLE) AS Precipitacao,
@@ -1380,23 +1620,39 @@ with tabs[3]:
                     try_cast(Latitude AS DOUBLE) AS Latitude,
                     try_cast(Longitude AS DOUBLE) AS Longitude
                 FROM read_csv_auto('{path}')
-                WHERE 
-                    RiscoFogo BETWEEN 0 AND 1 AND 
-                    Precipitacao >= 0 AND 
+                WHERE
+                    RiscoFogo BETWEEN 0 AND 1 AND
+                    Precipitacao >= 0 AND
                     DiaSemChuva >= 0 AND
                     Latitude BETWEEN -15 AND 5 AND
                     Longitude BETWEEN -60 AND -45
+                    {'AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None else ''} -- Add year filter
             """)
         full_query = " UNION ALL ".join(queries)
         df = conn.execute(full_query).fetchdf()
         df = df.dropna(subset=['DataHora'])
         return df
 
-    df_inpe = load_inpe_duckdb(files)
+    @st.cache_data(show_spinner=False)
+    def get_available_inpe_years(filepaths):
+         conn = duckdb.connect(database=':memory:')
+         queries = []
+         for path in filepaths:
+             queries.append(f"""
+                 SELECT DISTINCT extract(year from try_cast(DataHora as TIMESTAMP)) as year
+                 FROM read_csv_auto('{path}')
+                 WHERE try_cast(DataHora as TIMESTAMP) IS NOT NULL
+             """)
+         full_query = " UNION ALL ".join(queries)
+         years_df = conn.execute(full_query).fetchdf()
+         return sorted(years_df['year'].dropna().astype(int).unique())
+
+    anos = get_available_inpe_years(files)
+    ano_selecionado = st.selectbox('Selecione o ano para análise:', anos, index=len(anos) - 1)
+
+    df_inpe = load_inpe_duckdb(files, year=ano_selecionado)
 
     if not df_inpe.empty:
-        anos = sorted(df_inpe['DataHora'].dt.year.dropna().unique())
-        ano_selecionado = st.selectbox('Selecione o ano para análise:', anos, index=len(anos) - 1)
         figs = graficos_inpe(df_inpe, ano_selecionado)
 
         st.subheader("Evolução Temporal do Risco de Fogo")
@@ -1405,13 +1661,13 @@ with tabs[3]:
 
         with st.expander("Detalhes e Fonte da Figura 5.1"):
             st.write(f"""
-            **Interpretação:**  
+            **Interpretação:**
             O gráfico mostra como o risco médio de fogo varia mês a mês em {ano_selecionado}, numa escala de 0 (mínimo) a 1 (máximo).
 
             - **Pontos:** valores médios mensais.
             - **Linha:** tendência ao longo do ano.
 
-            **Observação para {ano_selecionado}:**  
+            **Observação para {ano_selecionado}:**
             { {
                 2020: "Pico em agosto (0.94).",
                 2021: "Pico em julho (0.87).",
@@ -1431,7 +1687,7 @@ with tabs[3]:
             st.caption(f"Figura 5.2: Municípios com maior risco médio de fogo em {ano_selecionado}.")
             with st.expander("Detalhes e Fonte da Figura 5.2"):
                 st.write(f"""
-                **Interpretação:**  
+                **Interpretação:**
                 Ranking dos municípios com maior risco médio de fogo em {ano_selecionado}.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
@@ -1443,7 +1699,7 @@ with tabs[3]:
             st.caption(f"Figura 5.3: Municípios com maior precipitação acumulada em {ano_selecionado}.")
             with st.expander("Detalhes e Fonte da Figura 5.3"):
                 st.write(f"""
-                **Interpretação:**  
+                **Interpretação:**
                 Ranking dos municípios com maior volume de chuva (mm) em {ano_selecionado}.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
@@ -1452,24 +1708,212 @@ with tabs[3]:
 
         with col2:
             st.subheader("Mapa de Distribuição dos Focos de Calor")
-            st.plotly_chart( 
-                figs['mapa'], 
-                use_container_width=True, 
+            st.plotly_chart(
+                figs['mapa'],
+                use_container_width=True,
                 config={'scrollZoom': True}
             )
             st.caption(f"Figura 5.4: Distribuição espacial dos focos de calor em {ano_selecionado}.")
             with st.expander("Detalhes e Fonte da Figura 5.4"):
                 st.write(f"""
-                **Interpretação:**  
-                Cada ponto representa um foco de calor detectado por satélite em {ano_selecionado}.  
+                **Interpretação:**
+                Cada ponto representa um foco de calor detectado por satélite em {ano_selecionado}.
                 Alta densidade indica maior atividade de queimadas.
                 {"(Dados disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")" if ano_selecionado == 2024 else ""}
 
                 **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
                 """)
-
     else:
-        st.warning("Nenhum dado disponível após filtros.")
+        st.warning(f"Nenhum dado de foco de calor encontrado para o ano de {ano_selecionado}.")
 
 with tabs[4]:
-    st.header("")
+    st.header("Desmatamento")
+
+    with st.expander("ℹ️ Sobre esta seção", expanded=True):
+        st.write("""
+        Esta análise apresenta dados sobre áreas de alerta de desmatamento, incluindo:
+        - Distribuição por Unidade de Conservação
+        - Evolução temporal
+        - Distribuição por município
+        - Distribuição espacial (Mapa)
+
+        Os dados são provenientes do MapBiomas Alerta.
+        """)
+        st.markdown(
+            "**Fonte Geral da Seção:** MapBiomas Alerta. Plataforma de Dados de Alertas de Desmatamento. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.",
+            unsafe_allow_html=True
+        )
+
+    st.write("**Filtro Global:**")
+    anos_disponiveis = ['Todos'] + sorted(gdf_alertas['ANODETEC'].unique().tolist())
+    ano_global_selecionado = st.selectbox('Ano de Detecção:', anos_disponiveis, key="filtro_ano_global")
+    
+    if ano_global_selecionado != 'Todos':
+        gdf_alertas_filtrado = gdf_alertas[gdf_alertas['ANODETEC'] == ano_global_selecionado].copy()
+    else:
+        gdf_alertas_filtrado = gdf_alertas.copy()
+    
+    st.divider()
+
+    col_charts, col_map = st.columns([2, 3], gap="large")
+
+    with col_charts:
+        if not gdf_cnuc.empty and not gdf_alertas_filtrado.empty:
+            fig_desmat_uc = fig_desmatamento_uc(gdf_cnuc, gdf_alertas_filtrado)
+            if fig_desmat_uc.data:
+                st.subheader("Área de Alertas por UC")
+                st.plotly_chart(fig_desmat_uc, use_container_width=True, height=400, key="desmat_uc_chart")
+                st.caption("Figura 6.1: Área total de alertas de desmatamento por unidade de conservação.")
+                with st.expander("Detalhes e Fonte da Figura 6.1"):
+                    st.write("""
+                    **Interpretação:**
+                    O gráfico mostra a área total (em hectares) de alertas de desmatamento detectados dentro de cada unidade de conservação.
+
+                    **Observações:**
+                    - Barras representam a área total de alertas em hectares por UC.
+                    - A linha tracejada indica a média da área de alertas entre as UCs exibidas.
+                    - Ordenado por área de alertas em ordem decrescente.
+
+                    **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
+                    """)
+            else:
+                st.info("Nenhum alerta de desmatamento encontrado sobrepondo as Unidades de Conservação.")
+        else:
+            st.warning("Dados de Unidades de Conservação ou Alertas de Desmatamento não disponíveis para esta análise.")
+
+        st.divider()
+
+        if not gdf_alertas_filtrado.empty:
+            fig_desmat_mun_bar = fig_desmatamento_municipio(gdf_alertas_filtrado)
+            if fig_desmat_mun_bar.data:
+                st.subheader("Área de Alertas por Município")
+                st.plotly_chart(fig_desmat_mun_bar, use_container_width=True, height=400, key="desmat_municipio_chart")
+                st.caption("Figura 6.2: Área total de alertas de desmatamento por município (Top 10).")
+                with st.expander("Detalhes e Fonte da Figura 6.2"):
+                    st.write("""
+                    **Interpretação:**
+                    O gráfico de barras apresenta os 10 municípios com a maior área total (em hectares) de alertas de desmatamento.
+
+                    **Observações:**
+                    - Barras representam a área total de alertas em hectares por município.
+                    - A linha tracejada indica a média da área de alertas entre os 10 municípios exibidos.
+                    - Ordenado por área de alertas em ordem decrescente.
+
+                    **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
+                    """)
+            else:
+                st.info("Dados de alertas de desmatamento não contêm informações de município válidas.")
+        else:
+            st.warning("Dados de Alertas de Desmatamento não disponíveis para esta análise.")
+
+    with col_map:
+        if not gdf_alertas_filtrado.empty:
+            minx, miny, maxx, maxy = gdf_alertas_filtrado.total_bounds
+            centro = {'lat': (miny + maxy) / 2, 'lon': (minx + maxx) / 2}
+            
+            fig_desmat_map_pts = fig_desmatamento_mapa_pontos(gdf_alertas_filtrado, centro)
+            if fig_desmat_map_pts.data:
+                st.subheader("Mapa de Alertas")
+                st.plotly_chart(
+                    fig_desmat_map_pts,
+                    use_container_width=True,
+                    height=850,  
+                    config={'scrollZoom': True},
+                    key="desmat_mapa_pontos_chart"
+                )
+                st.caption("Figura 6.3: Distribuição espacial dos alertas de desmatamento.")
+                with st.expander("Detalhes e Fonte da Figura 6.3"):
+                    st.write("""
+                    **Interpretação:**
+                    O mapa mostra a localização e a área (representada pelo tamanho e cor do ponto) dos alertas de desmatamento.
+
+                    **Observações:**
+                    - Cada ponto representa um alerta de desmatamento.
+                    - O tamanho e a cor do ponto são proporcionais à área desmatada (em hectares).
+                    - Áreas com maior concentração de pontos indicam maior atividade de desmatamento.
+
+                    **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
+                    """)
+            else:
+                st.info("Dados de alertas de desmatamento não contêm informações geográficas válidas para o mapa.")
+        else:
+            st.warning("Dados de Alertas de Desmatamento não disponíveis para esta análise.")
+
+        st.divider()
+        st.subheader("Ranking de Municípios por Desmatamento")
+        if not gdf_alertas_filtrado.empty:
+            ranking_municipios = gdf_alertas_filtrado.groupby(['ESTADO', 'MUNICIPIO']).agg({
+                'AREAHA': ['sum', 'count', 'mean'],
+                'ANODETEC': ['min', 'max'],
+                'BIOMA': lambda x: x.mode().iloc[0] if not x.empty else 'N/A',
+                'FONTE': lambda x: ', '.join(x.unique()),
+                'VPRESSAO': lambda x: x.mode().iloc[0] if not x.empty and x.mode().size > 0 else 'N/A'
+            }).round(2)
+            
+            ranking_municipios.columns = ['Área Total (ha)', 'Qtd Alertas', 'Área Média (ha)', 
+                                        'Ano Min', 'Ano Max', 'Bioma Principal', 'Fontes', 'Vetor Pressão']
+        
+            ranking_municipios = ranking_municipios.reset_index()
+            
+            ranking_municipios = ranking_municipios.sort_values('Área Total (ha)', ascending=False)
+            
+            ranking_municipios.insert(0, 'Posição', range(1, len(ranking_municipios) + 1))
+            
+            ranking_municipios['Área Total (ha)'] = ranking_municipios['Área Total (ha)'].apply(lambda x: f"{x:,.2f}")
+            ranking_municipios['Área Média (ha)'] = ranking_municipios['Área Média (ha)'].apply(lambda x: f"{x:.2f}")
+            
+            st.dataframe(
+                ranking_municipios.head(10), 
+                use_container_width=True, 
+                hide_index=True,
+                height=400
+            )
+            
+            st.caption("Tabela 6.1: Ranking dos municípios com maior área de alertas de desmatamento (Top 10).")
+            
+            with st.expander("Detalhes da Tabela 6.1 e Informações das Colunas"):
+                st.write("""
+                **Interpretação:**  
+                Ranking dos municípios ordenados pela área total de alertas de desmatamento detectados, com informações complementares sobre quantidade de alertas, período e características predominantes.
+                
+                **Informações das Colunas:**
+                - **Posição**: Ranking baseado na área total de desmatamento
+                - **Estado**: Estado onde se localiza o município
+                - **Município**: Município onde se localiza o alerta
+                - **Área Total (ha)**: Soma de todas as áreas de alertas do município em hectares
+                - **Qtd Alertas**: Quantidade total de alertas detectados no município
+                - **Área Média (ha)**: Área média por alerta no município
+                - **Ano Min/Max**: Período de detecção dos alertas (primeiro e último ano)
+                - **Bioma Principal**: Bioma mais frequente nos alertas do município
+                - **Fontes**: Sistemas de detecção dos alertas (DETER, SAD, GLAD)
+                - **Vetor Pressão**: Principal vetor de pressão detectado nos alertas
+                
+                **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
+                """)
+        else:
+            st.info("Dados não disponíveis para o ranking")
+
+    st.divider() 
+
+    if not gdf_alertas.empty:
+        fig_desmat_temp = fig_desmatamento_temporal(gdf_alertas)
+        if fig_desmat_temp.data:
+            st.subheader("Evolução Temporal de Alertas")
+            st.plotly_chart(fig_desmat_temp, use_container_width=True, height=400, key="desmat_temporal_chart")
+            st.caption("Figura 6.4: Evolução mensal da área total de alertas de desmatamento.")
+            with st.expander("Detalhes e Fonte da Figura 6.4"):
+                st.write("""
+                **Interpretação:**
+                O gráfico de linha mostra a variação mensal da área total (em hectares) de alertas de desmatamento ao longo do tempo.
+
+                **Observações:**
+                - Cada ponto representa a soma da área de alertas para um determinado mês.
+                - A linha conecta os pontos para mostrar a tendência temporal.
+                - Valores são exibidos acima de cada ponto para facilitar a leitura.
+
+                **Fonte:** MapBiomas Alerta. *Plataforma de Dados de Alertas de Desmatamento*. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.
+                """)
+        else:
+            st.info("Dados de alertas de desmatamento não contêm informações temporais válidas.")
+    else:
+        st.warning("Dados de Alertas de Desmatamento não disponíveis para esta análise.")     
