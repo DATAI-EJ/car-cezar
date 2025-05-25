@@ -791,7 +791,6 @@ def fig_justica(df_proc: pd.DataFrame) -> dict[str, go.Figure]:
         x='ano_mes', y='Quantidade',
         markers=True, text='Quantidade'
     )
-    # faz aparecer o texto acima de cada marcador
     fig_temp.update_traces(
         mode='lines+markers+text',
         textposition='top center',
@@ -1088,13 +1087,12 @@ def fig_desmatamento_uc(gdf_cnuc: gpd.GeoDataFrame, gdf_alertas: gpd.GeoDataFram
     if alerts_in_ucs.empty:
          return go.Figure() 
 
-    # Using correct column name: 'AREAHA'
     alert_area_per_uc = alerts_in_ucs.groupby('nome_uc')['AREAHA'].sum().reset_index()
-    alert_area_per_uc.columns = ['nome_uc', 'alerta_ha_total'] # Rename for clarity
+    alert_area_per_uc.columns = ['nome_uc', 'alerta_ha_total'] 
 
     alert_area_per_uc = alert_area_per_uc.sort_values('alerta_ha_total', ascending=False)
 
-    alert_area_per_uc['uc_wrap'] = alert_area_per_uc['nome_uc'].apply(lambda x: wrap_label(x, 15)) # Use 15 width like other UC charts
+    alert_area_per_uc['uc_wrap'] = alert_area_per_uc['nome_uc'].apply(lambda x: wrap_label(x, 15)) 
 
     fig = px.bar(
         alert_area_per_uc,
@@ -1108,7 +1106,7 @@ def fig_desmatamento_uc(gdf_cnuc: gpd.GeoDataFrame, gdf_alertas: gpd.GeoDataFram
         customdata=np.stack([alert_area_per_uc.alerta_ha_total, alert_area_per_uc.nome_uc], axis=-1),
         hovertemplate=(
             "<b>%{customdata[1]}</b><br>"
-            "Área de Alertas: %{customdata[0]:,.0f} ha<extra></extra>" # Format with comma separator
+            "Área de Alertas: %{customdata[0]:,.0f} ha<extra></extra>" 
         ),
         texttemplate="%{y:,.0f}", 
         textposition="outside", 
@@ -1154,8 +1152,6 @@ def fig_desmatamento_temporal(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
                           xaxis_title="Data", yaxis_title="Área (ha)")
          return _apply_layout(fig, title="Evolução Temporal de Alertas (Desmatamento)", title_size=16)
 
-
-    # Group by month and sum area
     df_monthly = df_valid_dates.set_index('DATADETEC').resample('ME')['AREAHA'].sum().reset_index()
     df_monthly['DATADETEC'] = df_monthly['DATADETEC'].dt.to_period('M').astype(str)
 
@@ -1171,7 +1167,7 @@ def fig_desmatamento_temporal(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
     fig.update_traces(
         mode='lines+markers+text',
         textposition='top center',
-        texttemplate='%{text:,.0f}', # Corrected syntax
+        texttemplate='%{text:,.0f}', 
         hovertemplate=(
             "Mês/Ano: %{x}<br>"
             "Área de Alertas: %{y:,.0f} ha<extra></extra>"
@@ -1198,7 +1194,7 @@ def fig_desmatamento_municipio(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
     df_mun = gdf_alertas.groupby('MUNICIPIO')['AREAHA'].sum().reset_index()
     df_mun.columns = ['municipio', 'alerta_ha_total']
 
-    df_mun = df_mun[df_mun['alerta_ha_total'] > 0].sort_values('alerta_ha_total', ascending=False).head(10) # Top 10
+    df_mun = df_mun[df_mun['alerta_ha_total'] > 0].sort_values('alerta_ha_total', ascending=False).head(10)
 
     if df_mun.empty:
          fig = go.Figure()
@@ -1206,7 +1202,7 @@ def fig_desmatamento_municipio(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
                           xaxis_title="Área (ha)", yaxis_title="Município")
          return _apply_layout(fig, title="Área de Alertas (Desmatamento) por Município", title_size=16)
 
-    df_mun['mun_wrap'] = df_mun['municipio'].apply(lambda x: wrap_label(x, 20)) # Use 20 width like CPT charts
+    df_mun['mun_wrap'] = df_mun['municipio'].apply(lambda x: wrap_label(x, 20)) 
 
     fig = px.bar(
         df_mun,
@@ -1229,7 +1225,6 @@ def fig_desmatamento_municipio(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
         )
     )
 
-    # Add mean line
     media = df_mun["alerta_ha_total"].mean()
     fig.add_shape(
         type="line", x0=media, x1=media,
@@ -1239,14 +1234,14 @@ def fig_desmatamento_municipio(gdf_alertas: gpd.GeoDataFrame) -> go.Figure:
     fig.add_annotation(
         x=media, y=1.02,
         xref='x', yref='paper',
-        text=f"Média = {media:,.0f} ha", # Format mean text
+        text=f"Média = {media:,.0f} ha", 
         showarrow=False,
         font=dict(color="FireBrick", size=10)
     )
 
     fig.update_xaxes(title_text="Área (ha)")
-    fig.update_yaxes(title_text="", autorange="reversed") # Reverse y-axis for horizontal bar chart
-    fig.update_layout(height=400, margin=dict(l=150, r=20, t=60, b=20)) # Adjust margins
+    fig.update_yaxes(title_text="", autorange="reversed") 
+    fig.update_layout(height=400, margin=dict(l=150, r=20, t=60, b=20))
 
     fig = _apply_layout(fig, title="Top 10 Municípios com Mais Alertas (Desmatamento)", title_size=16)
 
@@ -1630,7 +1625,6 @@ with tabs[1]:
             return 'background-color: #e8f5e8; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #e8f5e8'
         return ''
     
-    # Aplicar estilo
     styled_df = df_display_com_total.style.apply(
         lambda x: [aplicar_cor_social(val, col) for val, col in zip(x, df_display_com_total.columns)], 
         axis=1
@@ -2505,7 +2499,7 @@ with tabs[4]:
             }).round(2)
 
             ranking_municipios.columns = ['Área Total (ha)', 'Qtd Alertas', 'Área Média (ha)',
-                                          'Ano Min', 'Ano Max', 'Bioma Principal', 'Vetor Pressão'] # 'Fontes' removido daqui
+                                          'Ano Min', 'Ano Max', 'Bioma Principal', 'Vetor Pressão']
 
             ranking_municipios = ranking_municipios.reset_index()
 
