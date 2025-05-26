@@ -1560,8 +1560,6 @@ df_proc_raw    = load_df_proc(
     columns=df_proc_cols
 )
 
-caminho_fogo = r"Areas_de_interesse_ordenado.csv"
-
 tabs = st.tabs(["Sobreposições", "CPT", "Justiça", "Queimadas", "Desmatamento"])
 
 with tabs[0]:
