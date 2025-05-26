@@ -2662,25 +2662,6 @@ with tabs[4]:
             st.warning("Dados de Unidades de Conservação ou Alertas de Desmatamento não disponíveis para esta análise.")
 
         st.divider()
-        if not gdf_alertas_filtrado.empty:
-            fig_desmat_mun_bar = fig_desmatamento_municipio(gdf_alertas_filtrado)
-            if fig_desmat_mun_bar and fig_desmat_mun_bar.data:
-                st.subheader("Área de Alertas por Município")
-                st.plotly_chart(fig_desmat_mun_bar, use_container_width=True, height=400, key="desmat_municipio_chart")
-                st.caption("Figura 6.2: Área total de alertas de desmatamento por município (Top 10).")
-                with st.expander("Detalhes e Fonte da Figura 6.2"):
-                    st.write("""
-                    **Interpretação:**
-                    O gráfico de barras apresenta os 10 municípios com a maior área total (em hectares) de alertas de desmatamento.
-
-                    **Observações:**
-                    - Barras representam a área total de alertas em hectares por município.
-                    - A linha tracejada indica a média da área de alertas entre os 10 municípios exibidos.
-                    - Ordenado por área de alertas em ordem decrescente.""")
-            else:
-                st.info("Não foram encontrados dados para gerar o gráfico de área de alertas por município para o período selecionado.")
-        else:
-            st.info("Dados de Alertas de Desmatamento não disponíveis para a análise por município.")
 
     with col_map:
         if not gdf_alertas_filtrado.empty:
