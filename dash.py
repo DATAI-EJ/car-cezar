@@ -113,8 +113,6 @@ h1 {
 </style>
 """, unsafe_allow_html=True)
 
-px.set_mapbox_access_token(os.getenv("MAPBOX_TOKEN"))
-
 def _apply_layout(fig: go.Figure, title: str, title_size: int = 16) -> go.Figure:
     fig.update_layout(
         template="pastel",
