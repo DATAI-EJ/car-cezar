@@ -6,3 +6,6 @@ shapely
 openpyxl
 numpy
 duckdb
+fiona
+pyproj
+rtree
