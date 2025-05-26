@@ -164,7 +164,7 @@ st.markdown("---")
 def _patched_px_bar(*args, **kwargs) -> go.Figure:
     fig: go.Figure = _original_px_bar(*args, **kwargs)
     seq = PASTEL_SEQ
-    barmode = fig.layout.barmode or ''
+    barmode = getattr(fig.layout, 'barmode', '') or ''
     barras = [t for t in fig.data if isinstance(t, go.Bar)]
     if barmode == 'stack':
         for i, trace in enumerate(barras):
@@ -172,7 +172,7 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
     else:
         if len(barras) == 1:
             trace = barras[0]
-            vals = trace.x if trace.orientation != 'h' else trace.y
+            vals = trace.x if getattr(trace, 'orientation', None) != 'h' else trace.y
             if hasattr(vals, 'tolist'):
                 vals = vals.tolist()
             trace.marker.color = [seq[i % len(seq)] for i in range(len(vals))]
@@ -186,7 +186,7 @@ px.bar = _patched_px_bar
 @st.cache_data
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
     """Carrega um shapefile, calcula áreas e percentuais, e otimiza tipos de dados."""
-    gdf = gpd.read_file(caminho, columns=columns)
+    gdf = gpd.read_file(caminho, columns=columns or [])
     
     gdf["geometry"] = gdf["geometry"].apply(lambda geom: geom.buffer(0) if geom and not geom.is_valid else geom)
     gdf = gdf[gdf["geometry"].notnull() & gdf["geometry"].is_valid]
@@ -319,9 +319,9 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
             "nome_uc", "municipio", "perc_alerta", "perc_sigef",
             "alerta_km2", "sigef_km2", "area_km2"
         ],
-        map_style="open-street-map",
+        mapbox_style="open-street-map",
         center=centro,
-        zoom=4,
+        zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
         opacity=0.7
     )
     if ids_selecionados:
@@ -338,7 +338,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 ],
                 mapbox_style="open-street-map",
                 center=centro,
-                zoom=4,
+                zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
                 opacity=0.8
             )
              for trace in fig_sel.data:
@@ -409,7 +409,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
         mapbox=dict(
             style="open-street-map",
             center=centro,
-            zoom=4
+            zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4
         ),
         margin={"r":0,"t":0,"l":0,"b":0},
         legend=dict(
@@ -1328,61 +1328,37 @@ def fig_desmatamento_temporal(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.Figu
 
 def fig_desmatamento_municipio(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.Figure:
     """Cria um gráfico de barras mostrando a área total de alertas de desmatamento por município."""
-    if gdf_alertas_filtered.empty or 'MUNICIPIO' not in gdf_alertas_filtered.columns or 'AREAHA' not in gdf_alertas_filtered.columns:
-        fig = go.Figure()
-        fig.update_layout(title="Área de Alertas (Desmatamento) por Município",
-                          xaxis_title="Área (ha)", yaxis_title="Município")
-        return _apply_layout(fig, title="Área de Alertas (Desmatamento) por Município", title_size=16)
-
-    gdf_alertas_filtered['AREAHA'] = pd.to_numeric(gdf_alertas_filtered['AREAHA'], errors='coerce')
-
-    df_mun = gdf_alertas_filtered.groupby('MUNICIPIO', observed=False)['AREAHA'].sum().reset_index()
-    df_mun.columns = ['municipio', 'alerta_ha_total']
-
-    df_mun = df_mun[df_mun['alerta_ha_total'] > 0].sort_values('alerta_ha_total', ascending=False).head(10)
-
-    if df_mun.empty:
-         fig = go.Figure()
-         fig.update_layout(title="Área de Alertas (Desmatamento) por Município",
-                          xaxis_title="Área (ha)", yaxis_title="Município")
-         return _apply_layout(fig, title="Área de Alertas (Desmatamento) por Município", title_size=16)
-
-    df_mun['mun_wrap'] = df_mun['municipio'].apply(lambda x: wrap_label(x, 20)) 
+    df = gdf_alertas_filtered.sort_values('AREAHA', ascending=False)
+    if df.empty:
+        return go.Figure()
 
     fig = px.bar(
-        df_mun,
-        x='alerta_ha_total',
-        y='mun_wrap',
+        df,
+        x='AREAHA',
+        y='MUNICIPIO',
         orientation='h',
-        labels={"alerta_ha_total":"Área de Alertas (ha)","mun_wrap":"Município"},
-        text='alerta_ha_total'
+        text='AREAHA',
+        labels={'AREAHA': 'Área (ha)', 'MUNICIPIO': ''}
+    )
+    fig = _apply_layout(fig, title="Desmatamento por Município")
+
+    fig.update_layout(
+        yaxis=dict(autorange="reversed"),
+        xaxis=dict(
+            tickformat=',d'                 
+        ),
+        margin=dict(l=80, r=100, t=50, b=20) 
     )
 
     fig.update_traces(
-        texttemplate='%{text:,.0f}',
+        texttemplate='%{text:.0f}',
         textposition='outside',
-        cliponaxis=False,
-        marker_line_color="rgb(80,80,80)",
-        marker_line_width=0.5,
-        hovertemplate=(
-            "Município: %{y}<br>"
-            "Área de Alertas: %{x:,.0f} ha<extra></extra>"
-        )
+        cliponaxis=False,                 
+        marker_line_color='rgb(80,80,80)',
+        marker_line_width=0.5
     )
 
-    media = df_mun["alerta_ha_total"].mean()
-    fig.add_shape(
-        type="line", x0=media, x1=media,
-        yref='paper', y0=0, y1=1,
-        line=dict(color="FireBrick", width=2, dash="dash"),
-    )
-    fig.add_annotation(
-        x=media, y=1.02,
-        xref='x', yref='paper',
-        text=f"Média = {media:,.0f} ha", 
-        showarrow=False,
-        font=dict(color="FireBrick", size=10)
-    )
+    return fig
 
 def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.Figure:
     """Cria um mapa de dispersão dos alertas de desmatamento."""
@@ -1428,6 +1404,7 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
     elif max_range < 5: zoom_level = 5
     elif max_range < 10: zoom_level = 4
     elif max_range < 20: zoom_level = 3.5
+    zoom_level = int(round(zoom_level))
 
     sample_size = 50000
     if len(gdf_map) > sample_size:
@@ -1570,7 +1547,7 @@ with tabs[0]:
         st.markdown(
             "**Fonte Geral da Seção:** MMA - Ministério do Meio Ambiente. Cadastro Nacional de Unidades de Conservação. Brasília: MMA.",
             unsafe_allow_html=True
-        )
+               )
 
     perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(gdf_cnuc_raw, gdf_sigef_raw, None)
     cols = st.columns(5, gap="small")
@@ -1587,7 +1564,7 @@ with tabs[0]:
         border:1px solid #E0E0E0;
         padding:1rem;
         border-radius:8px;
-        box-shadow:0 2px 5px rgba(0,0,0,0.1);
+        box-shadow:0 2px 4px rgba(0,0,0,0.1);
         text-align:center;
         height:100px;
         display:flex;
