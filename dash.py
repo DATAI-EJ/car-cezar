@@ -311,7 +311,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
 
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
     try:
-        fig: go.Figure = px.choropleth_mapbox(
+        fig: go.Figure = px.choropleth_map(
             gdf_cnuc_filtered,
             geojson=gdf_cnuc_filtered.__geo_interface__,
             locations="id",
@@ -319,7 +319,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 "nome_uc", "municipio", "perc_alerta", "perc_sigef",
                 "alerta_km2", "sigef_km2", "area_km2"
             ],
-            mapbox_style="open-street-map",
+            map_style="open-street-map",
             center=centro,
             zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
             opacity=0.7
@@ -327,7 +327,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
         print("Mapa base criado com sucesso")
     except Exception as e:
         print(f"Erro ao criar mapa base: {e}")
-        fig: go.Figure = px.choropleth_mapbox(
+        fig: go.Figure = px.choropleth_map(
             gdf_cnuc_filtered,
             geojson=gdf_cnuc_filtered.__geo_interface__,
             locations="id",
@@ -335,7 +335,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 "nome_uc", "municipio", "perc_alerta", "perc_sigef",
                 "alerta_km2", "sigef_km2", "area_km2"
             ],
-            mapbox_style="carto-positron",
+            map_style="carto-positron",
             center=centro,
             zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
             opacity=0.7
@@ -347,7 +347,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
             ids = list(set(ids_selecionados)) if ids_selecionados is not None else []
             gdf_sel = gdf_cnuc_filtered[gdf_cnuc_filtered["id"].isin(ids)]
             if not gdf_sel.empty:
-                fig_sel: go.Figure = px.choropleth_mapbox(
+                fig_sel: go.Figure = px.choropleth_map(
                     gdf_sel,
                     geojson=gdf_sel.__geo_interface__,
                     locations="id",
@@ -355,7 +355,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                         "nome_uc", "municipio", "perc_alerta", "perc_sigef",
                         "alerta_km2", "sigef_km2", "area_km2"
                     ],
-                    mapbox_style="open-street-map",
+                    map_style="open-street-map",
                     center=centro,
                     zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
                     opacity=0.8
@@ -378,7 +378,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 ]
             )
             if not filtro_sigef.empty:
-                trace_sigef = go.Choroplethmapbox(
+                trace_sigef = go.Choroplethmap(
                     geojson=filtro_sigef.__geo_interface__,
                     locations=filtro_sigef["id_sigef"],
                     z=[1] * len(filtro_sigef),
@@ -406,7 +406,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                     base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
                     outline = [max(0, s + 4) for s in base]
                     
-                    fig.add_trace(go.Scattermapbox( 
+                    fig.add_trace(go.Scattermap(
                         lat=df_c["Latitude"],
                         lon=df_c["Longitude"],
                         mode="markers",
@@ -414,7 +414,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                         hoverinfo="none",
                         showlegend=False
                     ))
-                    fig.add_trace(go.Scattermapbox(
+                    fig.add_trace(go.Scattermap(
                         lat=df_c["Latitude"],
                         lon=df_c["Longitude"],
                         mode="markers",
