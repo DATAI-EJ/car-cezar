@@ -153,14 +153,7 @@ base_layout = go.Layout(
 pastel_template = go.layout.Template(layout=base_layout)
 pio.templates["pastel"] = pastel_template
 pio.templates.default = "pastel"
-
-px.defaults.color_discrete_sequence = (
-    px.colors.qualitative.Pastel   
-  + px.colors.qualitative.Pastel1  
-  + px.colors.qualitative.Pastel2  
-)
-
-px.defaults.template = "pastel"
+PASTEL_SEQ = px.colors.qualitative.Pastel + px.colors.qualitative.Pastel1 + px.colors.qualitative.Pastel2
 
 _original_px_bar = px.bar
 
@@ -170,7 +163,7 @@ st.markdown("---")
 
 def _patched_px_bar(*args, **kwargs) -> go.Figure:
     fig: go.Figure = _original_px_bar(*args, **kwargs)
-    seq = px.defaults.color_discrete_sequence
+    seq = PASTEL_SEQ
     barmode = fig.layout.barmode or ''
     barras = [t for t in fig.data if isinstance(t, go.Bar)]
     if barmode == 'stack':
@@ -180,6 +173,8 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
         if len(barras) == 1:
             trace = barras[0]
             vals = trace.x if trace.orientation != 'h' else trace.y
+            if hasattr(vals, 'tolist'):
+                vals = vals.tolist()
             trace.marker.color = [seq[i % len(seq)] for i in range(len(vals))]
         else:
             for i, trace in enumerate(barras):
@@ -330,7 +325,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
         opacity=0.7
     )
     if ids_selecionados:
-        ids = list(set(ids_selecionados))
+        ids = list(set(ids_selecionados)) if ids_selecionados is not None else []
         gdf_sel = gdf_cnuc_filtered[gdf_cnuc_filtered["id"].isin(ids)]
         if not gdf_sel.empty:
              fig_sel = px.choropleth_map(
@@ -711,15 +706,18 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
 def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     df = (
         df_csv_filtered
-        .sort_values('Áreas de conflitos', ascending=False)
+        .sort_values('Áreas de conflitos', ascending=True)
         .reset_index(drop=True)
     )
     if df.empty:
         return go.Figure()
 
     df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
-    seq = px.defaults.color_discrete_sequence
+    seq = PASTEL_SEQ
     bar_colors = [seq[i % len(seq)] for i in range(len(df))]
+
+    y_vals = df['Mun_wrap'].tolist() if hasattr(df['Mun_wrap'], 'tolist') else list(df['Mun_wrap'])
+    x_vals = df['Áreas de conflitos'].tolist() if hasattr(df['Áreas de conflitos'], 'tolist') else list(df['Áreas de conflitos'])
 
     fig = px.bar(
         df,
@@ -731,6 +729,7 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
             'Áreas de conflitos': 'Ocupações Retomadas',
             'Mun_wrap': 'Município'
         },
+        color_discrete_sequence=seq
     )
 
     fig.update_traces(
@@ -756,14 +755,10 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
         showarrow=False,
         font=dict(color='FireBrick', size=10)
     )
-    fig.update_layout(
-        height=450,
-        margin=dict(l=150, r=20, t=60, b=20)
-    )
-    fig.update_yaxes(
-        categoryorder='total ascending' 
-    )
-    return _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
+    fig.update_layout(height=450)
+    fig = _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
+
+    return fig
 
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
     df = df_conflitos_filtered.sort_values('Total_Famílias', ascending=False)
@@ -973,7 +968,6 @@ def fig_justica(df_proc_filtered: pd.DataFrame) -> dict[str, go.Figure]:
             figs[key] = go.Figure().update_layout(title=title, annotations=[dict(text="Sem dados", showarrow=False)])
 
     return figs 
-
 
 def corrige_coord(x):
     if pd.isna(x):
@@ -2678,7 +2672,7 @@ with tabs[4]:
                     key="desmat_mapa_pontos_chart"
                 )
                 st.caption("Figura 6.3: Distribuição espacial dos alertas de desmatamento.")
-                with st.expander("Detalhes e Fonte da Figura 6.3"):
+                with st.expander("Detalhes e Fonte da Figura"):
                     st.write("""
                     **Interpretação:**
                     O mapa mostra a localização e a área (representada pelo tamanho e cor do ponto) dos alertas de desmatamento.
