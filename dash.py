@@ -310,121 +310,156 @@ def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
     return res
 
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
-
-    fig = px.choropleth_mapbox(
-        gdf_cnuc_filtered,
-        geojson=gdf_cnuc_filtered.__geo_interface__,
-        locations="id",
-        hover_data=[
-            "nome_uc", "municipio", "perc_alerta", "perc_sigef",
-            "alerta_km2", "sigef_km2", "area_km2"
-        ],
-        mapbox_style="open-street-map",
-        center=centro,
-        zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
-        opacity=0.7
-    )
+    try:
+        fig: go.Figure = px.choropleth_mapbox(
+            gdf_cnuc_filtered,
+            geojson=gdf_cnuc_filtered.__geo_interface__,
+            locations="id",
+            hover_data=[
+                "nome_uc", "municipio", "perc_alerta", "perc_sigef",
+                "alerta_km2", "sigef_km2", "area_km2"
+            ],
+            mapbox_style="open-street-map",
+            center=centro,
+            zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
+            opacity=0.7
+        )
+        print("Mapa base criado com sucesso")
+    except Exception as e:
+        print(f"Erro ao criar mapa base: {e}")
+        fig: go.Figure = px.choropleth_mapbox(
+            gdf_cnuc_filtered,
+            geojson=gdf_cnuc_filtered.__geo_interface__,
+            locations="id",
+            hover_data=[
+                "nome_uc", "municipio", "perc_alerta", "perc_sigef",
+                "alerta_km2", "sigef_km2", "area_km2"
+            ],
+            mapbox_style="carto-positron",
+            center=centro,
+            zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
+            opacity=0.7
+        )
+        print("Usando carto-positron como fallback")
+    
     if ids_selecionados:
-        ids = list(set(ids_selecionados)) if ids_selecionados is not None else []
-        gdf_sel = gdf_cnuc_filtered[gdf_cnuc_filtered["id"].isin(ids)]
-        if not gdf_sel.empty:
-             fig_sel = px.choropleth_mapbox(
-                gdf_sel,
-                geojson=gdf_sel.__geo_interface__,
-                locations="id",
-                hover_data=[
-                    "nome_uc", "municipio", "perc_alerta", "perc_sigef",
-                    "alerta_km2", "sigef_km2", "area_km2"
-                ],
-                mapbox_style="open-street-map",
-                center=centro,
-                zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
-                opacity=0.8
-            )
-             for trace in fig_sel.data:
-                fig.add_trace(trace)
+        try:
+            ids = list(set(ids_selecionados)) if ids_selecionados is not None else []
+            gdf_sel = gdf_cnuc_filtered[gdf_cnuc_filtered["id"].isin(ids)]
+            if not gdf_sel.empty:
+                fig_sel: go.Figure = px.choropleth_mapbox(
+                    gdf_sel,
+                    geojson=gdf_sel.__geo_interface__,
+                    locations="id",
+                    hover_data=[
+                        "nome_uc", "municipio", "perc_alerta", "perc_sigef",
+                        "alerta_km2", "sigef_km2", "area_km2"
+                    ],
+                    mapbox_style="open-street-map",
+                    center=centro,
+                    zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4,
+                    opacity=0.8
+                )
+                for trace in fig_sel.data:
+                    fig.add_trace(trace)
+                print("Seleções adicionadas com sucesso")
+        except Exception as e:
+            print(f"Erro ao adicionar seleções: {e}")
 
     if invadindo_opcao is not None:
-        filtro_sigef = (
-            gdf_sigef_filtered 
-            if invadindo_opcao.lower() == "todos"
-            else gdf_sigef_filtered[
-                gdf_sigef_filtered["invadindo"]
-                .str.strip()
-                .str.lower() == invadindo_opcao.strip().lower()
-            ]
-        )
-        if not filtro_sigef.empty:
-            trace_sigef = go.Choroplethmapbox(
-                geojson=filtro_sigef.__geo_interface__,
-                locations=filtro_sigef["id_sigef"],
-                z=[1] * len(filtro_sigef),
-                colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
-                marker_opacity=0.5,
-                marker_line_width=1,
-                showlegend=False,
-                showscale=False
+        try:
+            filtro_sigef = (
+                gdf_sigef_filtered 
+                if invadindo_opcao.lower() == "todos"
+                else gdf_sigef_filtered[
+                    gdf_sigef_filtered["invadindo"]
+                    .str.strip()
+                    .str.lower() == invadindo_opcao.strip().lower()
+                ]
             )
-            fig.add_trace(trace_sigef)
+            if not filtro_sigef.empty:
+                trace_sigef = go.Choroplethmapbox(
+                    geojson=filtro_sigef.__geo_interface__,
+                    locations=filtro_sigef["id_sigef"],
+                    z=[1] * len(filtro_sigef),
+                    colorscale=[[0, "#FF4136"], [1, "#FF4136"]],
+                    marker_opacity=0.5,
+                    marker_line_width=1,
+                    showlegend=False,
+                    showscale=False
+                )
+                fig.add_trace(trace_sigef)
+                print("Dados SIGEF adicionados com sucesso")
+        except Exception as e:
+            print(f"Erro ao adicionar SIGEF: {e}")
 
-    df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
-    if not df_csv_unique.empty:
-        cidades = df_csv_unique["Município"].unique()
-        paleta = px.colors.qualitative.Pastel
-        mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
-        for c in cidades:
-            df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
-            if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
-                df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
-                base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
-                outline = [max(0, s + 4) for s in base]
-                
-                fig.add_trace(go.Scattermap(
-                    lat=df_c["Latitude"],
-                    lon=df_c["Longitude"],
-                    mode="markers",
-                    marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
-                    hoverinfo="none",
-                    showlegend=False
-                ))
-                fig.add_trace(go.Scattermap(
-                    lat=df_c["Latitude"],
-                    lon=df_c["Longitude"],
-                    mode="markers",
-                    marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
-                    text=df_c.apply(
-                        lambda r: (
-                            f"Município: {r.get('Município', 'N/A')}<br>"
-                            f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
-                            f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
+    try:
+        df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
+        if not df_csv_unique.empty:
+            cidades = df_csv_unique["Município"].unique()
+            paleta = px.colors.qualitative.Pastel
+            mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
+            for c in cidades:
+                df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
+                if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
+                    df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
+                    base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
+                    outline = [max(0, s + 4) for s in base]
+                    
+                    fig.add_trace(go.Scattermapbox( 
+                        lat=df_c["Latitude"],
+                        lon=df_c["Longitude"],
+                        mode="markers",
+                        marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
+                        hoverinfo="none",
+                        showlegend=False
+                    ))
+                    fig.add_trace(go.Scattermapbox(
+                        lat=df_c["Latitude"],
+                        lon=df_c["Longitude"],
+                        mode="markers",
+                        marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
+                        text=df_c.apply(
+                            lambda r: (
+                                f"Município: {r.get('Município', 'N/A')}<br>"
+                                f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
+                                f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
+                            ),
+                            axis=1
                         ),
-                        axis=1
-                    ),
-                    hoverinfo="text",
-                    name=f"<b>Ocorrências – {c}</b>", 
-                    showlegend=True
-                ))
+                        hoverinfo="text",
+                        name=f"<b>Ocorrências – {c}</b>", 
+                        showlegend=True
+                    ))
+            print("Dados CSV adicionados com sucesso")
+    except Exception as e:
+        print(f"Erro ao processar CSV: {e}")
 
-    fig.update_layout(
-        mapbox=dict(
-            style="open-street-map",
-            center=centro,
-            zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4
-        ),
-        margin={"r":0,"t":0,"l":0,"b":0},
-        legend=dict(
-            x=0.01,         
-            y=0.99,           
-            xanchor="left",
-            yanchor="top",
-            bgcolor="rgba(255,255,255,0)", 
-            bordercolor="rgba(0,0,0,0)",    
-            font=dict(size=10)
-        ),
-        height=550
-    )
+    try:
+        fig.update_layout(
+            mapbox=dict(
+                style="open-street-map",
+                center=centro,
+                zoom=int(centro.get('zoom', 4)) if isinstance(centro, dict) and 'zoom' in centro else 4
+            ),
+            margin={"r":0,"t":0,"l":0,"b":0},
+            legend=dict(
+                x=0.01,         
+                y=0.99,           
+                xanchor="left",
+                yanchor="top",
+                bgcolor="rgba(255,255,255,0)", 
+                bordercolor="rgba(0,0,0,0)",    
+                font=dict(size=10)
+            ),
+            height=550
+        )
+        print("Layout configurado com sucesso")
+    except Exception as e:
+        print(f"Erro no layout: {e}")
+    
     return fig
-
+    
 def criar_cards(gdf_cnuc_filtered, gdf_sigef_filtered, invadindo_opcao):
     try:
         ucs_selecionadas = gdf_cnuc_filtered.copy()
