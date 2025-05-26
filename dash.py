@@ -311,7 +311,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
 
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
 
-    fig = px.choropleth_map(
+    fig = px.choropleth_mapbox(
         gdf_cnuc_filtered,
         geojson=gdf_cnuc_filtered.__geo_interface__,
         locations="id",
@@ -328,7 +328,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
         ids = list(set(ids_selecionados)) if ids_selecionados is not None else []
         gdf_sel = gdf_cnuc_filtered[gdf_cnuc_filtered["id"].isin(ids)]
         if not gdf_sel.empty:
-             fig_sel = px.choropleth_map(
+             fig_sel = px.choropleth_mapbox(
                 gdf_sel,
                 geojson=gdf_sel.__geo_interface__,
                 locations="id",
@@ -355,7 +355,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
             ]
         )
         if not filtro_sigef.empty:
-            trace_sigef = go.Choroplethmap(
+            trace_sigef = go.Choroplethmapbox(
                 geojson=filtro_sigef.__geo_interface__,
                 locations=filtro_sigef["id_sigef"],
                 z=[1] * len(filtro_sigef),
@@ -1384,7 +1384,7 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
         fig.update_layout(title="Mapa de Alertas (Desmatamento)")
         return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
 
-    gdf_map = gdf_map.dropna(subset=['Latitude', 'Longitude', 'AREAHA'])
+    gdf_map = gdf_map.dropna(subset=['Latitude', 'Longitude'])
 
     if gdf_map.empty:
         fig = go.Figure()
@@ -1561,7 +1561,7 @@ with tabs[0]:
     card_template = """
     <div style="
         background-color:#F9F9FF;
-        border:1px solid #E0E0E0;
+        border:1px solid #E00E0;
         padding:1rem;
         border-radius:8px;
         box-shadow:0 2px 4px rgba(0,0,0,0.1);
