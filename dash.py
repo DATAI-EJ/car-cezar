@@ -301,6 +301,9 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     if df is None:
         raise ValueError(f"Não foi possível ler o arquivo {caminho} com nenhum dos encodings: {encodings}")
     
+    if 'Ãreas de conflitos' in df.columns:
+        df = df.rename(columns={'Ãreas de conflitos': 'Áreas de conflitos'})
+        
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
     
