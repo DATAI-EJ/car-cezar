@@ -592,14 +592,26 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     import csv
-    if columns is not None:
-        with open(caminho, newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader)
-        columns_present = [col for col in columns if col in header]
-    else:
-        columns_present = None
-    df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow')
+    encoding = 'utf-8'
+    try:
+        if columns is not None:
+            with open(caminho, newline='', encoding=encoding) as f:
+                reader = csv.reader(f)
+                header = next(reader)
+            columns_present = [col for col in columns if col in header]
+        else:
+            columns_present = None
+        df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
+    except UnicodeDecodeError:
+        encoding = 'latin1'
+        if columns is not None:
+            with open(caminho, newline='', encoding=encoding) as f:
+                reader = csv.reader(f)
+                header = next(reader)
+            columns_present = [col for col in columns if col in header]
+        else:
+            columns_present = None
+        df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
     cols_ocorrencias = [
@@ -1578,23 +1590,12 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
         "VPRESSAO": "Vetor Pressão"
     }
 
-    # Apenas manter colunas que existem no DataFrame resultante
     colunas_presentes = [col for col in colunas_exibir.keys() if col in gdf_unificado.columns]
     gdf_unificado = gdf_unificado[colunas_presentes]
     gdf_unificado = gdf_unificado.rename(columns={k: v for k, v in colunas_exibir.items() if k in colunas_presentes})
 
-    # Exibindo a tabela com opção de download
     st.dataframe(gdf_unificado, use_container_width=True)
-    
-    # Opção de download da tabela unificada
-    csv = gdf_unificado.to_csv(index=False)
-    st.download_button(
-        label="Baixar Tabela Unificada (CSV)",
-        data=csv,
-        file_name="tabela_unificada_conflitos.csv",
-        mime="text/csv",
-        key="download_tabela_unificada"
-    )
+
 
 def fig_desmatamento_uc(gdf_cnuc, gdf_alertas):
     gdf_uc_alertas = gdf_alertas.dissolve(by="nome_uc", aggfunc="sum", as_index=False)
