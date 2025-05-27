@@ -271,16 +271,39 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     import csv
-    if columns is not None:
-        with open(caminho, newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader)
-        columns_present = [col for col in columns if col in header]
-    else:
-        columns_present = None
-    df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow')
+    encodings = ['utf-8', 'latin-1', 'windows-1252']
+    
+    df = None
+    encoding_usado = None
+    
+    for encoding in encodings:
+        try:
+            if columns is not None:
+                with open(caminho, newline='', encoding=encoding) as f:
+                    reader = csv.reader(f)
+                    header = next(reader)
+                columns_present = [col for col in columns if col in header]
+            else:
+                columns_present = None
+            
+            df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
+            encoding_usado = encoding
+            print(f"Arquivo lido com sucesso usando encoding: {encoding}")
+            break
+            
+        except (UnicodeDecodeError, UnicodeError):
+            print(f"Falha ao ler com encoding {encoding}, tentando próximo...")
+            continue
+        except Exception as e:
+            print(f"Erro ao ler arquivo com encoding {encoding}: {str(e)}")
+            continue
+    
+    if df is None:
+        raise ValueError(f"Não foi possível ler o arquivo {caminho} com nenhum dos encodings: {encodings}")
+    
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
+    
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -288,6 +311,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     existing_cols_ocorrencias = [col for col in cols_ocorrencias if col in df.columns]
     if existing_cols_ocorrencias:
         df["total_ocorrencias"] = df[existing_cols_ocorrencias].sum(axis=1)
+    
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
             if df[col].dtype == 'float64':
@@ -303,6 +327,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
         elif pd.api.types.is_string_dtype(df[col]):
             if len(df[col].unique()) < 100:
                 df[col] = pd.Categorical(df[col])
+    
     return df
 
 @st.cache_data
