@@ -283,7 +283,16 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    df = pd.read_csv(caminho, usecols=columns, engine='pyarrow')
+    import csv
+    if columns is not None:
+        with open(caminho, newline='', encoding='utf-8') as f:
+            reader = csv.reader(f)
+            header = next(reader)
+        columns_present = [col for col in columns if col in header]
+    else:
+        columns_present = None
+
+    df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow')
 
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
