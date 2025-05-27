@@ -11,33 +11,6 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-def optimize_dtypes(df):
-    """Otimiza os tipos de dados de um DataFrame usando pyarrow."""
-    for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            if df[col].dtype == 'float64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.float32())
-            elif df[col].dtype == 'int64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.int32())
-        elif pd.api.types.is_string_dtype(df[col]):
-            if len(df[col].unique()) / len(df) < 0.5:
-                df[col] = pd.Categorical(df[col])
-    return df
-
-def save_to_parquet(df, filepath):
-    """Salva DataFrame em formato parquet com compressão."""
-    pq.write_table(
-        pa.Table.from_pandas(df),
-        filepath,
-        compression='snappy'
-    )
-
-def read_from_parquet(filepath):
-    """Lê DataFrame do formato parquet."""
-    return pq.read_table(filepath).to_pandas()
-
 st.set_page_config(
     page_title="Dashboard de Conflitos Ambientais",
     page_icon="🌳",
@@ -237,7 +210,7 @@ def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns:
         except Exception as e:
             st.warning(f"Could not reproject for area calculation: {e}. Using existing 'area_km2' or skipping area calcs.")
             if "area_km2" not in gdf.columns:
-                gdf["area_km2"] = np.nan
+                 gdf["area_km2"] = np.nan 
 
     if calcular_percentuais and "area_km2" in gdf.columns:
         gdf["perc_alerta"] = (gdf.get("alerta_km2", 0) / gdf["area_km2"]) * 100
@@ -249,20 +222,19 @@ def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns:
         if "perc_sigef" not in gdf.columns: gdf["perc_sigef"] = 0
 
     gdf["id"] = gdf.index.astype(str)
-    
-    # Otimizar tipos de dados não geométricos usando pyarrow
+
     for col in gdf.columns:
-        if col != 'geometry':
-            if pd.api.types.is_numeric_dtype(gdf[col]):
-                if gdf[col].dtype == 'float64':
-                    if gdf[col].isnull().sum() == 0:
-                        gdf[col] = pa.array(gdf[col], type=pa.float32())
-                elif gdf[col].dtype == 'int64':
-                    if gdf[col].isnull().sum() == 0:
-                        gdf[col] = pa.array(gdf[col], type=pa.int32())
-            elif pd.api.types.is_string_dtype(gdf[col]):
-                if len(gdf[col].unique()) < 100:
-                    gdf[col] = pd.Categorical(gdf[col])
+        if gdf[col].dtype == 'float64':
+            gdf[col] = pd.to_numeric(gdf[col], downcast='float', errors='coerce')
+        elif gdf[col].dtype == 'int64':
+            gdf[col] = pd.to_numeric(gdf[col], downcast='integer', errors='coerce')
+        elif gdf[col].dtype == 'object':
+            # Só converte para category se poucos valores únicos
+            if len(gdf[col].unique()) < 100:
+                 try:
+                    gdf[col] = gdf[col].astype('category')
+                 except Exception:
+                    pass 
 
     return gdf.to_crs("EPSG:4326")
 
@@ -283,20 +255,11 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    import csv
-    if columns is not None:
-        with open(caminho, newline='', encoding='utf-8') as f:
-            reader = csv.reader(f)
-            header = next(reader)
-        columns_present = [col for col in columns if col in header]
-    else:
-        columns_present = None
-
-    df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow')
-
+    df = pd.read_csv(caminho, low_memory=False, usecols=columns)
+    
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
-
+    
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -304,22 +267,22 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     existing_cols_ocorrencias = [col for col in cols_ocorrencias if col in df.columns]
     if existing_cols_ocorrencias:
         df["total_ocorrencias"] = df[existing_cols_ocorrencias].sum(axis=1)
+        df["total_ocorrencias"] = pd.to_numeric(df["total_ocorrencias"], downcast='integer', errors='coerce')
+    else:
+        df["total_ocorrencias"] = 0 
 
     for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            if df[col].dtype == 'float64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.float32()).to_numpy() 
-                else:
-                    df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
-            elif df[col].dtype == 'int64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.int32()).to_numpy() 
-                else:
-                    df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-        elif pd.api.types.is_string_dtype(df[col]):
-            if len(df[col].unique()) / len(df) < 0.5:
-                df[col] = pd.Categorical(df[col])
+        if df[col].dtype == 'float64':
+            df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
+        elif df[col].dtype == 'int64':
+            df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
+        elif df[col].dtype == 'object':
+            # Só converte para category se poucos valores únicos
+            if len(df[col].unique()) < 100:
+                 try:
+                    df[col] = df[col].astype('category')
+                 except Exception:
+                    pass
 
     return df
 
@@ -422,44 +385,43 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
             )
             fig.add_trace(trace_sigef)
 
-    if "Município" in df_csv_filtered.columns:
-        df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
-        if not df_csv_unique.empty:
-            cidades = df_csv_unique["Município"].unique()
-            paleta = px.colors.qualitative.Pastel
-            mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
-            for c in cidades:
-                df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
-                if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
-                    df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
-                    base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
-                    outline = [max(0, s + 4) for s in base]
-                    
-                    fig.add_trace(go.Scattermap(
-                        lat=df_c["Latitude"],
-                        lon=df_c["Longitude"],
-                        mode="markers",
-                        marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
-                        hoverinfo="none",
-                        showlegend=False
-                    ))
-                    fig.add_trace(go.Scattermap(
-                        lat=df_c["Latitude"],
-                        lon=df_c["Longitude"],
-                        mode="markers",
-                        marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
-                        text=df_c.apply(
-                            lambda r: (
-                                f"Município: {r.get('Município', 'N/A')}<br>"
-                                f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
-                                f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
-                            ),
-                            axis=1
+    df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
+    if not df_csv_unique.empty:
+        cidades = df_csv_unique["Município"].unique()
+        paleta = px.colors.qualitative.Pastel
+        mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
+        for c in cidades:
+            df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
+            if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
+                df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
+                base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
+                outline = [max(0, s + 4) for s in base]
+                
+                fig.add_trace(go.Scattermap(
+                    lat=df_c["Latitude"],
+                    lon=df_c["Longitude"],
+                    mode="markers",
+                    marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
+                    hoverinfo="none",
+                    showlegend=False
+                ))
+                fig.add_trace(go.Scattermap(
+                    lat=df_c["Latitude"],
+                    lon=df_c["Longitude"],
+                    mode="markers",
+                    marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
+                    text=df_c.apply(
+                        lambda r: (
+                            f"Município: {r.get('Município', 'N/A')}<br>"
+                            f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
+                            f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
                         ),
-                        hoverinfo="text",
-                        name=f"<b>Ocorrências – {c}</b>", 
-                        showlegend=True
-                    ))
+                        axis=1
+                    ),
+                    hoverinfo="text",
+                    name=f"<b>Ocorrências – {c}</b>", 
+                    showlegend=True
+                ))
 
     fig.update_layout(
         mapbox=dict(
@@ -631,7 +593,7 @@ def fig_sobreposicoes(gdf_cnuc_ha_filtered):
         gdf,
         x="uc_short",
         y=["alerta_ha","sigef_ha","area_ha"],
-        labels={"value":"Área (km)","uc_short":"UC"},
+        labels={"value":"Área (ha)","uc_short":"UC"},
         barmode="stack",
         text_auto=True,
     )
@@ -1205,40 +1167,30 @@ df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'a
 
 @st.cache_data
 def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
-    # Usar pyarrow como engine para leitura eficiente
-    df = pd.read_csv(caminho, sep=";", encoding="windows-1252", usecols=columns, engine='pyarrow')
-    
-    # Otimizar tipos de dados usando pyarrow schema
+    df = pd.read_csv(caminho, sep=";", encoding="windows-1252", usecols=columns)
     for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            if df[col].dtype == 'float64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.float32())
-            elif df[col].dtype == 'int64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.int32())
-        elif pd.api.types.is_string_dtype(df[col]):
+        if df[col].dtype == 'float64':
+            df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
+        elif df[col].dtype == 'int64':
+            df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
+        elif df[col].dtype == 'object':
             if len(df[col].unique()) < 100:
-                df[col] = pd.Categorical(df[col])
-    
+                try:
+                    df[col] = df[col].astype('category')
+                except Exception:
+                    pass
     return df
+
+# --- Definições de Funções para Lazy Loading ---
 
 def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
     st.write("### Tabela Unificada de Dados")
     
-    for gdf, nome in [(gdf_alertas, "alertas"), (gdf_sigef, "sigef"), (gdf_cnuc, "cnuc")]:
-        if "geometry" not in gdf.columns:
-            st.error(f"Coluna 'geometry' ausente em {nome}. Não é possível unir os dados.")
-            return
-        if "municipio" not in gdf.columns:
-            if "MUNICIPIO" in gdf.columns:
-                gdf["municipio"] = gdf["MUNICIPIO"]
-            else:
-                gdf["municipio"] = None
-
+    # Unindo os dados em um único GeoDataFrame para exibição
     gdf_unificado = gdf_alertas.merge(gdf_sigef, on=["geometry", "municipio"], how="outer", suffixes=("_alertas", "_sigef"))
     gdf_unificado = gdf_unificado.merge(gdf_cnuc, on=["geometry", "municipio"], how="outer", suffixes=("", "_cnuc"))
 
+    # Selecionando e renomeando colunas relevantes para exibição
     colunas_exibir = {
         "geometry": "Geometria",
         "municipio": "Município",
@@ -1256,10 +1208,8 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
         "VPRESSAO": "Vetor Pressão"
     }
 
-    # Apenas manter colunas que existem no DataFrame resultante
-    colunas_presentes = [col for col in colunas_exibir.keys() if col in gdf_unificado.columns]
-    gdf_unificado = gdf_unificado[colunas_presentes]
-    gdf_unificado = gdf_unificado.rename(columns={k: v for k, v in colunas_exibir.items() if k in colunas_presentes})
+    gdf_unificado = gdf_unificado[list(colunas_exibir.keys())]
+    gdf_unificado = gdf_unificado.rename(columns=colunas_exibir)
 
     # Exibindo a tabela com opção de download
     st.dataframe(gdf_unificado, use_container_width=True)
@@ -1315,9 +1265,11 @@ def fig_desmatamento_uc(gdf_cnuc, gdf_alertas):
     return _apply_layout(fig, title="Área de Alertas de Desmatamento por UC", title_size=16)
 
 def fig_desmatamento_temporal(gdf_alertas):
+    # Agrupamento mensal
     gdf_alertas['DATADETEC'] = pd.to_datetime(gdf_alertas['DATADETEC'], errors='coerce')
     gdf_mensal = gdf_alertas.resample('M', on='DATADETEC').sum().reset_index()
 
+    # Gráfico
     fig = px.line(
         gdf_mensal,
         x='DATADETEC',
@@ -1339,41 +1291,38 @@ def fig_desmatamento_temporal(gdf_alertas):
     return _apply_layout(fig, title="Evolução Mensal da Área de Alertas de Desmatamento", title_size=16)
 
 def fig_desmatamento_mapa_pontos(gdf_alertas):
-    if 'MUNICIPIO' in gdf_alertas.columns and 'geometry' in gdf_alertas.columns:
-        gdf_points = gdf_alertas.copy()
-        gdf_points['centroid'] = gdf_points.geometry.centroid
-        gdf_points['Latitude'] = gdf_points.centroid.y
-        gdf_points['Longitude'] = gdf_points.centroid.x
+    # Mapa de pontos
+    fig = px.scatter_geo(
+        gdf_alertas,
+        lat='Latitude',
+        lon='Longitude',
+        color='RiscoFogo',
+        size='area_km2',
+        hover_name='municipio',
+        hover_data=['ANODETEC', 'CODEALERTA'],
+        color_continuous_scale=px.colors.sequential.YlOrRd,
+        size_max=10,
+        title="Distribuição Espacial dos Alertas de Desmatamento"
+    )
+    fig.update_geos(
+        scope="south america",
+        showland=True,
+        landcolor="white",
+        countrycolor="lightgrey"
+    )
+    fig.update_layout(
+        title="Distribuição Espacial dos Alertas de Desmatamento",
+        margin=dict(l=20, r=20, t=50, b=20),
+        height=600
+    )
+    return _apply_layout(fig, title="Distribuição Espacial dos Alertas de Desmatamento", title_size=16)
 
-        fig = px.scatter_geo(
-            gdf_points,
-            lat='Latitude',
-            lon='Longitude',
-            color='AREAHA', 
-            size='AREAHA',
-            hover_name='MUNICIPIO',
-            hover_data=['ANODETEC', 'CODEALERTA', 'AREAHA'],
-            color_continuous_scale=px.colors.sequential.YlOrRd,
-            size_max=10,
-            title="Distribuição Espacial dos Alertas de Desmatamento"
-        )
-        fig.update_geos(
-            scope="south america",
-            showland=True,
-            landcolor="white",
-            countrycolor="lightgrey"
-        )
-        fig.update_layout(
-            title="Distribuição Espacial dos Alertas de Desmatamento",
-            margin=dict(l=20, r=20, t=50, b=20),
-            height=600
-        )
-        return _apply_layout(fig, title="Distribuição Espacial dos Alertas de Desmatamento", title_size=16)
-    return go.Figure()
+# --- Bloco das Abas ---
 
 tabs = st.tabs(["Sobreposições", "CPT", "Justiça", "Queimadas", "Desmatamento"])
 
 with tabs[0]:
+    # Carregamento sob demanda para Sobreposições
     df_csv_raw = load_csv(
         "CPT-PA-count.csv",
         columns=df_csv_cols
@@ -1540,7 +1489,6 @@ with tabs[0]:
         with st.expander("Detalhes e Fonte da Figura 1.4"):
             st.write("""
             **Interpretação:**
-
             O gráfico mostra o número de alertas e CARs sobrepostos a cada unidade de conservação.
 
             **Observações:**
@@ -1579,7 +1527,6 @@ with tabs[1]:
         "CPT-PA-count.csv",
         columns=df_csv_cols
     )
-    
     st.header("Impacto Social")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
@@ -1591,55 +1538,22 @@ with tabs[1]:
         Os dados são provenientes da Comissão Pastoral da Terra (CPT).
         """)
         st.markdown(
+
             "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.",
             unsafe_allow_html=True
         )
 
     col_fam, col_conf = st.columns(2, gap="large")
     with col_fam:
-        st.markdown("""<div style="
-            background-color: #fff;
-            border-radius: 6px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 0.5rem;">
-            <h3 style="
-                color: #1E1E1E;
-                margin-top: 0;
-                margin-bottom: 0.5rem;
-                font-size: 1.5rem;
-                border-bottom: 2px solid #E0E0E0;
-                padding-bottom: 0.3rem;">
-            Famílias Afetadas</h3>
-            <p style="
-                color: #666;
-                font-size: 0.95em;
-                margin-bottom:0;
-                line-height: 1.4;">
-            Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
         </div>""", unsafe_allow_html=True)
         st.info("Arquivo de famílias afetadas por município (Excel) não encontrado. Exiba apenas dados do CSV.")
     with col_conf:
-        st.markdown("""<div style="
-            background-color: #fff;
-            border-radius: 6px;
-            padding: 1.5rem;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            margin-bottom: 0.5rem;">
-            <h3 style="
-                color: #1E1E1E;
-                margin-top: 0;
-                margin-bottom: 0.5rem;
-                font-size: 1.5rem;
-                border-bottom: 2px solid #E0E0E0;
-                padding-bottom: 0.3rem;">
-            Conflitos Registrados</h3>
-            <p style="
-                color: #666;
-                font-size: 0.95em;
-                margin-bottom:0;
-                line-height: 1.4;">
-            Número total de conflitos agrários registrados por município.</p>
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados por município.</p>
         </div>""", unsafe_allow_html=True)
         st.info("Arquivo de famílias afetadas por município (Excel) não encontrado. Exiba apenas dados do CSV.")
     with st.divider():
@@ -2069,51 +1983,44 @@ with tabs[3]:
     @st.cache_data(show_spinner=False)
     def load_inpe_duckdb(filepaths, year=None):
         conn = duckdb.connect(database=':memory:')
-
-        conn.execute("INSTALL 'arrow'")
-        conn.execute("LOAD 'arrow'")
-
         queries = []
         for path in filepaths:
-            query = f"""
+            queries.append(f"""
                 SELECT
                     try_cast(DataHora as TIMESTAMP) AS DataHora,
-                    CAST(RiscoFogo AS DOUBLE) AS RiscoFogo,
-                    CAST(Precipitacao AS DOUBLE) AS Precipitação,
-                    mun_corrigido,
-                    CAST(DiaSemChuva AS INTEGER) AS DiaSemChuva,
-                    CAST(Latitude AS DOUBLE) AS Latitude,
-                    CAST(Longitude AS DOUBLE) AS Longitude
-                FROM read_csv_auto('{path}', format='arrow')
+                    try_cast(RiscoFogo AS DOUBLE) AS RiscoFogo,
+                    try_cast(Precipitacao AS DOUBLE) AS Precipitation,
+                    try_cast(mun_corrigido AS VARCHAR) AS mun_corrigido,
+                    try_cast(DiaSemChuva AS INT) AS DiaSemChuva,
+                    try_cast(Latitude AS DOUBLE) AS Latitude,
+                    try_cast(Longitude AS DOUBLE) AS Longitude
+                FROM read_csv_auto('{path}')
                 WHERE
                     RiscoFogo BETWEEN 0 AND 1 AND
-                    Precipitação >= 0 AND
+                    Precipitacao >= 0 AND
                     DiaSemChuva >= 0 AND
                     Latitude BETWEEN -15 AND 5 AND
                     Longitude BETWEEN -60 AND -45
-                    {' AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None and isinstance(year, int) else ''}
-            """
-            queries.append(query)
-
+                    {'AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None and isinstance(year, int) else ''}
+            """)
         full_query = " UNION ALL ".join(queries)
-
-        df = conn.execute(full_query).fetch_arrow_table().to_pandas()
+        df = conn.execute(full_query).fetchdf()
+    
         for col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[col]):
-                if df[col].dtype == 'float64':
-                    if df[col].isnull().sum() == 0:
-                        df[col] = pa.array(df[col], type=pa.float32())
-                elif df[col].dtype == 'int64':
-                    if df[col].isnull().sum() == 0:
-                        df[col] = pa.array(df[col], type=pa.int32())
-            elif pd.api.types.is_string_dtype(df[col]):
-                if len(df[col].unique()) / len(df) < 0.1:
-                    df[col] = pd.Categorical(df[col])
+            if df[col].dtype == 'float64':
+                df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
+            elif df[col].dtype == 'int64':
+                df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
+            elif df[col].dtype == 'object':
+                 if len(df[col].unique()) / len(df) < 100:
+                    try:
+                        df[col] = df[col].astype('category')
+                    except Exception:
+                        pass
 
         df = df.dropna(subset=['DataHora'])
         if 'mun_corrigido' in df.columns:
             df = df.dropna(subset=['mun_corrigido'])
-
         return df
 
     @st.cache_data(show_spinner=False)
@@ -2316,7 +2223,7 @@ with tabs[3]:
 
                         df_ranking_final_all.rename(columns=rename_dict, inplace=True)
 
-                        if ordenacao_col and ordenacao_col in df_ranking_final_all.columns:
+                        if ordenacao_col in df_ranking_final_all.columns:
                             df_ranking_final_all = df_ranking_final_all.sort_values(
                                 by=[ordenacao_col, 'Total de Registros'],
                                 ascending=[False, False]
@@ -2360,34 +2267,43 @@ with tabs[3]:
                             "Total de Registros": st.column_config.NumberColumn("Total Registros", format="%d", width="small")
                         }
 
-                        # Configure the main ranking column dynamically
-                        if tema_ranking_all == "Maior Risco de Fogo":
-                            column_config_ranking_all[col_valor_tema_renomeada_all] = st.column_config.NumberColumn(
-                                col_valor_tema_renomeada_all, format="%.3f", width="small"
-                            )
-                        elif tema_ranking_all == "Maior Precipitação (evento)":
-                             column_config_ranking_all[col_valor_tema_renomeada_all] = st.column_config.NumberColumn(
-                                col_valor_tema_renomeada_all, format="%.1f mm", width="small"
-                            )
-                        elif tema_ranking_all == "Máx. Dias Sem Chuva":
-                             column_config_ranking_all[col_valor_tema_renomeada_all] = st.column_config.NumberColumn(
-                                col_valor_tema_renomeada_all, format="%d dias", width="small"
-                            )
-
-                        # Configure the other two indicator columns if they are present and not the main one
-                        if "Risco de Fogo" in df_ranking_final_all.columns and "Risco de Fogo" != ordenacao_col:
-                            column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
-                                "Risco Fogo", format="%.3f", width="small"
-                            )
-                        if "Precipitação (mm)" in df_ranking_final_all.columns and "Precipitação (mm)" != ordenacao_col:
-                            column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
-                                "Precip. (mm)", format="%.1f mm", width="small"
-                            )
-                        if "Dias Sem Chuva" in df_ranking_final_all.columns and "Dias Sem Chuva" != ordenacao_col:
-                             column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
-                                "Dias Sem Chuva", format="%d", width="small"
-                            )
-
+                        if ordenacao_col and ordenacao_col in df_ranking_final_all.columns:
+                            if tema_ranking_all == "Maior Risco de Fogo":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Risco de Fogo", format="%.3f", width="small"
+                                )
+                                if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                        "Precip. (mm)", format="%.1f", width="small"
+                                    )
+                                if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                        "Dias S/Chuva", format="%d", width="small"
+                                    )
+                            elif tema_ranking_all == "Maior Precipitação (evento)":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Precipitação (mm)", format="%.1f", width="small"
+                                )
+                                if "Risco de Fogo" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                        "Risco Fogo", format="%.3f", width="small"
+                                    )
+                                if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                        "Dias S/Chuva", format="%d", width="small"
+                                    )
+                            elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Dias Sem Chuva", format="%d", width="small"
+                                )
+                                if "Risco de Fogo" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                        "Risco Fogo", format="%.3f", width="small"
+                                    )
+                                if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                        "Precip. (mm)", format="%.1f", width="small"
+                                    )
 
                         col_met1, col_met2, col_met3, col_met4 = st.columns(4)
 
@@ -2466,12 +2382,13 @@ with tabs[3]:
                      st.info(f"Não há dados válidos para gerar o ranking de '{tema_ranking_all}' no período selecionado.")
             else:
                  st.info(f"Não há dados válidos para gerar o ranking de '{tema_ranking_all}' no período selecionado.")
-        else:
+        else: 
             st.warning(f"Colunas necessárias não encontradas para gerar o ranking de '{tema_ranking_all}'. Verifique se {required_cols_all} estão presentes em df_ranking_base_all.")
-    else:
+    else: 
         st.warning("Nenhum dado de foco de calor encontrado para a seção de ranking.")
         
 with tabs[4]:
+    # Carregamento sob demanda para aba Desmatamento
     gdf_alertas_raw = carregar_shapefile(
         "alertas.shp",
         calcular_percentuais=False,
@@ -2560,7 +2477,7 @@ with tabs[4]:
                 with st.expander("Detalhes e Fonte da Figura"):
                     st.write("""
                     **Interpretação:**
-                    A localização dos alertas de desmatamento detectados por satélite.
+                    O mapa mostra a localização e a área (representada pelo tamanho e cor do ponto) dos alertas de desmatamento.
 
                     **Observações:**
                     - Cada ponto representa um alerta de desmatamento.
