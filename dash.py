@@ -1765,84 +1765,7 @@ with tabs[1]:
             unsafe_allow_html=True
         )
 
-    col_fam, col_conf = st.columns(2, gap="large")
-    with col_fam:
-        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
-            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(fig_familias(df_confmun_raw), use_container_width=True, height=400, key="familias")
-        st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
-        with st.expander("Detalhes e Fonte da Figura 3.1"):
-            st.write("""
-            **Interpretação:**
-            O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
-
-            **Observações:**
-            - Dados agregados por município
-            - Valores apresentados em ordem decrescente
-            - Inclui todos os tipos de conflitos registrados
-
-            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-            """)
-
-    with col_conf:
-        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
-            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados por município.</p>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(fig_conflitos(df_confmun_raw), use_container_width=True, height=400, key="conflitos")
-        st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
-        with st.expander("Detalhes e Fonte da Figura 3.2"):
-            st.write("""
-            **Interpretação:**
-            O gráfico mostra o número total de conflitos agrários registrados em cada município.
-    
-            **Observações:**
-            - Contagem total de ocorrências por município
-            - Ordenação por quantidade de conflitos
-            - Inclui todos os tipos de conflitos documentados
-    
-            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-            """)
-    
-    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 2rem 0 0.5rem 0;">
-        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
-        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
-    </div>""", unsafe_allow_html=True)
-    
-    st.plotly_chart(
-        fig_conflitos(df_display),
-        use_container_width=True,
-        height=300,
-        key="conflitos_display"
-    )
-    st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
-    with st.expander("Detalhes e Fonte da Figura 3.3"):
-        st.write("""
-        **Interpretação:**
-        O gráfico apresenta o número de conflitos registrados em cada município.
-    
-        **Observações:**
-        - Contabiliza todos os conflitos registrados na base
-        - Ordenação por quantidade de conflitos
-        - Destaca média como linha de referência
-    
-        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-        """)
-    
-    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; 
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
-           <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">
-             Tabela de Impactos Sociais
-           </h3>
-           <p style="color: #666; font-size: 0.95em; margin-bottom:0;">
-             Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.
-           </p>
-       </div>""", unsafe_allow_html=True)
-    
     df_tabela_social = df_confmun_raw.copy()
-    
     if 'df_csv_raw' in locals() and not df_csv_raw.empty:
         if 'Município' in df_csv_raw.columns:
             ocupacoes_por_municipio = df_csv_raw.groupby('Município', observed=False).size().reset_index(name='Ocupações_Retomadas')
@@ -1852,23 +1775,19 @@ with tabs[1]:
             df_tabela_social['Ocupações_Retomadas'] = 0
     else:
         df_tabela_social['Ocupações_Retomadas'] = 0
-    
     df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
-    
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
         'Total_Famílias': 'Famílias Afetadas',
         'Número_Conflitos': 'Conflitos Registrados',
         'Ocupações_Retomadas': 'Ocupações Retomadas'
     })
-    
     linha_total = pd.DataFrame({
         'Município': ['TOTAL'],
         'Famílias Afetadas': [df_display['Famílias Afetadas'].sum()],
         'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()],
         'Ocupações Retomadas': [df_display['Ocupações Retomadas'].sum()]
     })
-    
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
 
     def aplicar_cor_social(val, col):
@@ -1890,9 +1809,73 @@ with tabs[1]:
         'Conflitos Registrados': '{:,.0f}',
         'Ocupações Retomadas': '{:,.0f}'
     })
+
+    col_fam, col_conf = st.columns(2, gap="large")
+    with col_fam:
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
+        </div>""", unsafe_allow_html=True)
+        st.plotly_chart(fig_familias(df_confmun_raw), use_container_width=True, height=400, key="familias")
+        st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
+        with st.expander("Detalhes e Fonte da Figura 3.1"):
+            st.write("""
+            **Interpretação:**
+            O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
+
+            **Observações:**
+            - Dados agregados por município
+            - Valores apresentados em ordem decrescente
+            - Inclui todos os tipos de conflitos registrados
+
+            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+            """)
+    with col_conf:
+        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados por município.</p>
+        </div>""", unsafe_allow_html=True)
+        st.plotly_chart(fig_conflitos(df_confmun_raw), use_container_width=True, height=400, key="conflitos")
+        st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
+        with st.expander("Detalhes e Fonte da Figura 3.2"):
+            st.write("""
+            **Interpretação:**
+            O gráfico mostra o número total de conflitos agrários registrados em cada município.
+
+            **Observações:**
+            - Contagem total de ocorrências por município
+            - Ordenação por quantidade de conflitos
+            - Inclui todos os tipos de conflitos documentados
+
+            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+            """)
     
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 2rem 0 0.5rem 0;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
+    </div>""", unsafe_allow_html=True)
+
+    st.plotly_chart(
+        fig_conflitos(df_display_com_total),
+        use_container_width=True,
+        height=300,
+        key="conflitos_display"
+    )
+    st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
+    with st.expander("Detalhes e Fonte da Figura 3.3"):
+        st.write("""
+        **Interpretação:**
+        O gráfico apresenta o número de conflitos registrados em cada município.
+
+        **Observações:**
+        - Contabiliza todos os conflitos registrados na base
+        - Ordenação por quantidade de conflitos
+        - Destaca média como linha de referência
+
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+        """)
+
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
-    
     st.caption("Tabela 3.1: Dados consolidados de impactos sociais por município.")
     with st.expander("Detalhes e Fonte da Tabela 3.1"):
         st.write("""
