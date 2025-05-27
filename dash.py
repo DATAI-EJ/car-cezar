@@ -283,12 +283,11 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    # Usar pyarrow como engine para melhor performance
-    df = pd.read_csv(caminho, low_memory=False, usecols=columns, engine='pyarrow')
-    
+    df = pd.read_csv(caminho, usecols=columns, engine='pyarrow')
+
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
-    
+
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -296,16 +295,19 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     existing_cols_ocorrencias = [col for col in cols_ocorrencias if col in df.columns]
     if existing_cols_ocorrencias:
         df["total_ocorrencias"] = df[existing_cols_ocorrencias].sum(axis=1)
-    
-    # Otimizar tipos de dados usando pyarrow schema
+
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
             if df[col].dtype == 'float64':
                 if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.float32())
+                    df[col] = pa.array(df[col], type=pa.float32()).to_numpy() 
+                else:
+                    df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
             elif df[col].dtype == 'int64':
                 if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.int32())
+                    df[col] = pa.array(df[col], type=pa.int32()).to_numpy() 
+                else:
+                    df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
         elif pd.api.types.is_string_dtype(df[col]):
             if len(df[col].unique()) / len(df) < 0.5:
                 df[col] = pd.Categorical(df[col])
@@ -1525,6 +1527,7 @@ with tabs[0]:
         with st.expander("Detalhes e Fonte da Figura 1.4"):
             st.write("""
             **Interpretação:**
+
             O gráfico mostra o número de alertas e CARs sobrepostos a cada unidade de conservação.
 
             **Observações:**
