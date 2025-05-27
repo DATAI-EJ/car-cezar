@@ -758,19 +758,18 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     )
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
-def fig_ocupacoes(df: pd.DataFrame) -> go.Figure:
-    if df.empty or "Ocupações Retomadas" not in df.columns:
-        return go.Figure()
-
-    df = df.sort_values("Ocupações Retomadas", ascending=False)
-    fig = px.bar(
-        df,
-        x="Município",
-        y="Ocupações Retomadas",
-        title="Ocupações Retomadas por Município",
-        labels={"Ocupações Retomadas": "Qtd. Ocupações"},
-        template="plotly_white"
-    )
+def fig_areas_conflito(df_display_data):
+    df_plot = df_display_data[df_display_data['Município'] != 'TOTAL'].copy()
+    y_col = 'Áreas de Conflito'
+    if y_col not in df_plot.columns:
+        st.warning(f"Coluna '{y_col}' não encontrada para o gráfico 'Áreas de Conflito por Município'.")
+        fig = px.bar(title="Áreas de Conflito por Município (Dados Indisponíveis)")
+        fig.update_layout(xaxis_title="Município", yaxis_title=y_col)
+        return fig
+    df_plot[y_col] = pd.to_numeric(df_plot[y_col], errors='coerce').fillna(0)
+    df_plot = df_plot.sort_values(by=y_col, ascending=False)
+    fig = px.bar(df_plot, x='Município', y=y_col, title="Áreas de Conflito por Município")
+    fig.update_layout(xaxis_title="Município", yaxis_title=y_col)
     return fig
     
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
