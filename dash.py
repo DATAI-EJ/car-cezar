@@ -249,6 +249,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     usecols_arg = None
     if columns is not None:
         usecols_arg = lambda col: col in columns
+
     try:
         df = pd.read_csv(
             caminho,
@@ -262,9 +263,9 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
             usecols=usecols_arg,
             encoding='latin-1'
         )
+
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
-
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -292,6 +293,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
                     df[col] = df[col].astype('category')
                 except Exception:
                     pass
+
     return df
     
 @st.cache_data
