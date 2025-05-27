@@ -246,18 +246,27 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    """
-    Lê um CSV, tentando primeiro UTF-8 e, em caso de UnicodeDecodeError,
-    recarrega usando Latin-1. Em seguida, faz renomeação e compactação de tipos.
-    """
+    usecols_arg = None
+    if columns is not None:
+        usecols_arg = lambda col: col in columns
+
     try:
-        df = pd.read_csv(caminho, low_memory=False, usecols=columns)
+        df = pd.read_csv(
+            caminho,
+            low_memory=False,
+            usecols=usecols_arg
+        )
     except UnicodeDecodeError:
-        df = pd.read_csv(caminho, low_memory=False, usecols=columns, encoding='latin-1')
-    
+        df = pd.read_csv(
+            caminho,
+            low_memory=False,
+            usecols=usecols_arg,
+            encoding='latin-1'
+        )
+
+    # Renomeia coluna índice, se existir
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
-    
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -272,6 +281,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
         )
     else:
         df["total_ocorrencias"] = 0 
+
     for col in df.columns:
         dtype = df[col].dtype
         if dtype == 'float64':
