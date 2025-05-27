@@ -1862,7 +1862,7 @@ st.markdown(
        </div>""",
     unsafe_allow_html=True)
     
-    df_tabela_social = df_confmun_raw.copy()
+df_tabela_social = df_confmun_raw.copy()
     
     if 'df_csv_raw' in locals() and not df_csv_raw.empty:
         if 'Município' in df_csv_raw.columns:
