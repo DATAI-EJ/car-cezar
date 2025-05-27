@@ -246,14 +246,14 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    df = pd.read_csv(
-        caminho,
-        low_memory=False,
-        usecols=columns,
-        encoding='latin-1',
-        engine='python',     
-        on_bad_lines='warn'   
-    )
+    """
+    Lê um CSV, tentando primeiro UTF-8 e, em caso de UnicodeDecodeError,
+    recarrega usando Latin-1. Em seguida, faz renomeação e compactação de tipos.
+    """
+    try:
+        df = pd.read_csv(caminho, low_memory=False, usecols=columns)
+    except UnicodeDecodeError:
+        df = pd.read_csv(caminho, low_memory=False, usecols=columns, encoding='latin-1')
     
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
@@ -286,6 +286,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
                     pass
 
     return df
+    
 @st.cache_data
 def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
     """Carrega dados de conflitos de Excel, processa e otimiza tipos de dados."""
