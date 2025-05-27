@@ -760,18 +760,36 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
 def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
-    coluna = "Áreas de conflitos"
-    if coluna not in df_csv_filtered.columns or df_csv_filtered.empty:
+    primária = "Áreas de conflitos"
+    secundária = "total_ocorrencias"
+
+    if df_csv_filtered.empty:
         cell_values = [df_csv_filtered[col].tolist() for col in df_csv_filtered.columns]
         return go.Figure(
-            data=[
-                go.Table(
-                    header=dict(values=list(df_csv_filtered.columns)),
-                    cells=dict(values=cell_values)
-                )
-            ]
+            data=[go.Table(
+                header=dict(values=list(df_csv_filtered.columns)),
+                cells=dict(values=cell_values)
+            )]
         ).update_layout(
-            title_text="Não há dados de 'Áreas de conflitos'. Exibindo todo o DataFrame carregado",
+            title_text="DataFrame vazio — sem colunas para plotar",
+            height=400 + 20 * len(df_csv_filtered.columns)
+        )
+
+    if primária in df_csv_filtered.columns:
+        coluna = primária
+        título = "Áreas de conflitos por Município"
+    elif secundária in df_csv_filtered.columns:
+        coluna = secundária
+        título = "Total de Ocorrências por Município"
+    else:
+        cell_values = [df_csv_filtered[col].tolist() for col in df_csv_filtered.columns]
+        return go.Figure(
+            data=[go.Table(
+                header=dict(values=list(df_csv_filtered.columns)),
+                cells=dict(values=cell_values)
+            )]
+        ).update_layout(
+            title_text="Nenhuma coluna de ocorrências encontrada — exibindo DataFrame completo",
             height=400 + 20 * len(df_csv_filtered.columns)
         )
 
@@ -782,6 +800,7 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     )
 
     df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
+
     seq = PASTEL_SEQ
     bar_colors = [seq[i % len(seq)] for i in range(len(df))]
 
@@ -816,7 +835,7 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     )
 
     fig.update_layout(height=450)
-    fig = _apply_layout(fig, title="Áreas de conflitos por Município", title_size=18)
+    fig = _apply_layout(fig, title=título, title_size=18)
     return fig
     
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
