@@ -246,10 +246,10 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
+    st.write(f"[load_csv] Tentando carregar: {caminho}")
     usecols_arg = None
     if columns is not None:
         usecols_arg = lambda col: col in columns
-
     try:
         df = pd.read_csv(
             caminho,
@@ -263,9 +263,16 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
             usecols=usecols_arg,
             encoding='latin-1'
         )
-
+    
+    st.write(f"[load_csv] Colunas antes da renomeação de 'Unnamed: 0': {list(df.columns)}")
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
+        st.write(f"[load_csv] Colunas APÓS a tentativa de renomear 'Unnamed: 0' para 'Município': {list(df.columns)}")
+    else:
+        st.write("[load_csv] 'Unnamed: 0' NÃO encontrado nas colunas.")
+        if "Município" not in df.columns:
+            st.warning("[load_csv] ATENÇÃO: Nem 'Unnamed: 0' nem 'Município' foram encontrados inicialmente.")
+
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -293,7 +300,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
                     df[col] = df[col].astype('category')
                 except Exception:
                     pass
-
+    st.write(f"[load_csv] Colunas finais retornadas para {caminho}: {list(df.columns)}")
     return df
     
 @st.cache_data
@@ -1726,45 +1733,77 @@ with tabs[1]:
             unsafe_allow_html=True
         )
 
+    # Certifique-se que df_confmun_raw está definido e tem as colunas esperadas ANTES deste ponto.
+    # Ex: df_confmun_raw = load_data_for_confmun()
+    if 'df_confmun_raw' not in locals() or df_confmun_raw is None:
+        st.error("df_confmun_raw não está definido. Carregue os dados base primeiro.")
+        st.stop() # Interrompe a execução desta aba se os dados base não existirem
+
+    st.write("Colunas em `df_confmun_raw` no início de tabs[1]:", list(df_confmun_raw.columns) if df_confmun_raw is not None else "df_confmun_raw é None")
     df_tabela_social = df_confmun_raw.copy()
+    st.write("Colunas em `df_tabela_social` após cópia:", list(df_tabela_social.columns))
 
     caminho_csv_cpt = 'CPT-PA-count.csv'
-    df_areas_conflito_data = pd.DataFrame(columns=['Município', 'Areas_Conflito_Source'])
+    df_areas_conflito_data = pd.DataFrame(columns=['Município', 'Areas_Conflito_Source']) # Default empty
 
     try:
-        df_cpt_data_loaded = load_csv(caminho_csv_cpt)
+        df_cpt_data_loaded = load_csv(caminho_csv_cpt) # load_csv agora tem st.write interno
+        
         if 'Município' in df_cpt_data_loaded.columns and 'Áreas de conflitos' in df_cpt_data_loaded.columns:
             df_areas_conflito_data = df_cpt_data_loaded[['Município', 'Áreas de conflitos']].copy()
             df_areas_conflito_data.rename(columns={'Áreas de conflitos': 'Areas_Conflito_Source'}, inplace=True)
-        elif 'Município' not in df_cpt_data_loaded.columns:
-             st.error(f"Coluna 'Município' não encontrada em {caminho_csv_cpt} após o carregamento via load_csv.")
-        elif 'Áreas de conflitos' not in df_cpt_data_loaded.columns:
-             st.error(f"Coluna 'Áreas de conflitos' não encontrada em {caminho_csv_cpt} via load_csv.")
+            st.write("`df_areas_conflito_data` criado com sucesso a partir do CSV.")
+        else:
+            if 'Município' not in df_cpt_data_loaded.columns:
+                st.error(f"VERIFICAÇÃO EM TABS[1]: Coluna 'Município' REALMENTE não encontrada em df_cpt_data_loaded (colunas: {list(df_cpt_data_loaded.columns)}).")
+            if 'Áreas de conflitos' not in df_cpt_data_loaded.columns:
+                st.error(f"VERIFICAÇÃO EM TABS[1]: Coluna 'Áreas de conflitos' não encontrada em df_cpt_data_loaded (colunas: {list(df_cpt_data_loaded.columns)}).")
+            
     except FileNotFoundError:
-        st.error(f"Arquivo {caminho_csv_cpt} não encontrado. Verifique o caminho.")
+        st.error(f"Arquivo {caminho_csv_cpt} não encontrado.")
     except Exception as e:
         st.error(f"Erro ao carregar ou processar {caminho_csv_cpt}: {e}")
 
-    if not df_areas_conflito_data.empty and 'Areas_Conflito_Source' in df_areas_conflito_data.columns:
+    if not df_areas_conflito_data.empty and 'Areas_Conflito_Source' in df_areas_conflito_data.columns and 'Município' in df_areas_conflito_data.columns:
         df_tabela_social = df_tabela_social.merge(df_areas_conflito_data, on='Município', how='left')
         df_tabela_social['Areas_Conflito_Source'] = df_tabela_social['Areas_Conflito_Source'].fillna(0).astype(int)
-    elif 'Areas_Conflito_Source' not in df_tabela_social.columns :
+        st.write("Colunas em `df_tabela_social` após merge com dados de áreas de conflito:", list(df_tabela_social.columns))
+    elif 'Areas_Conflito_Source' not in df_tabela_social.columns : # Garante que a coluna exista mesmo se o merge falhar ou não acontecer
         df_tabela_social['Areas_Conflito_Source'] = 0
-
-    df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
+        st.write("`df_areas_conflito_data` estava vazio ou 'Areas_Conflito_Source'/'Município' ausente; 'Areas_Conflito_Source' em `df_tabela_social` preenchida com 0.")
     
+    st.write("Colunas em `df_tabela_social` antes da ordenação:", list(df_tabela_social.columns))
+    if 'Total_Famílias' in df_tabela_social.columns:
+        df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
+    else:
+        st.error("'Total_Famílias' não encontrada em df_tabela_social antes da ordenação. Não será possível ordenar por esta coluna.")
+
+    # Checagem crucial antes do rename
+    expected_cols_before_rename = ['Município', 'Total_Famílias', 'Número_Conflitos', 'Areas_Conflito_Source']
+    missing_cols = [col for col in expected_cols_before_rename if col not in df_tabela_social.columns]
+    if missing_cols:
+        st.error(f"Colunas faltando em `df_tabela_social` ANTES do rename: {missing_cols}. Colunas presentes: {list(df_tabela_social.columns)}")
+
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
-        'Total_Famílias': 'Famílias Afetadas',
-        'Número_Conflitos': 'Conflitos Registrados',
+        'Total_Famílias': 'Famílias Afetadas',      # Erro pode ocorrer aqui se 'Total_Famílias' não existir
+        'Número_Conflitos': 'Conflitos Registrados', # Erro pode ocorrer aqui se 'Número_Conflitos' não existir
         'Areas_Conflito_Source': 'Áreas de Conflito'
     })
+    st.write("Colunas em `df_display` após rename:", list(df_display.columns))
     
     soma_areas_conflito = 0
     if 'Áreas de Conflito' in df_display.columns:
         soma_areas_conflito = df_display['Áreas de Conflito'].sum()
     else:
         df_display['Áreas de Conflito'] = 0 
+
+    # Checagem antes de criar linha_total
+    expected_cols_for_total = ['Famílias Afetadas', 'Conflitos Registrados', 'Áreas de Conflito']
+    missing_in_df_display = [col for col in expected_cols_for_total if col not in df_display.columns]
+    if missing_in_df_display:
+        st.error(f"Colunas faltando em `df_display` para cálculo da linha TOTAL: {missing_in_df_display}. Colunas presentes: {list(df_display.columns)}")
+
 
     linha_total_dict = {
         'Município': ['TOTAL'],
@@ -1775,6 +1814,8 @@ with tabs[1]:
     
     linha_total = pd.DataFrame(linha_total_dict)
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
+    st.write("Colunas em `df_display_com_total` ANTES de passar para gráficos:", list(df_display_com_total.columns))
+    # st.write("Primeiras linhas de `df_display_com_total`:", df_display_com_total.head()) # Descomente para ver os dados
 
     def aplicar_cor_social(val, col_name, totals_row_series):
         is_total_row_val = False
@@ -1792,8 +1833,11 @@ with tabs[1]:
             base_style = 'background-color: #e3f2fd'
         
         is_total_cell_value_match = False
+        # Verifica se a linha de totais não está vazia e se a coluna existe nela
         if not totals_row_series.empty and col_name in totals_row_series.index:
             total_value_for_col = totals_row_series[col_name]
+            # Verifica se o valor na linha de total do df_display_com_total corresponde ao valor atual E ao valor da totals_row_series
+            # Isso garante que estamos na linha de total e o valor é o esperado para o total
             if df_display_com_total.loc[df_display_com_total['Município'] == 'TOTAL', col_name].iloc[0] == val and val == total_value_for_col:
                  is_total_cell_value_match = True
         
@@ -1801,7 +1845,9 @@ with tabs[1]:
              return base_style + '; font-weight: bold;'
         return base_style
 
-    totals_for_styling = df_display_com_total[df_display_com_total['Município'] == 'TOTAL'].iloc[0] if not df_display_com_total[df_display_com_total['Município'] == 'TOTAL'].empty else pd.Series()
+    # Garante que totals_for_styling seja uma Series mesmo se a linha TOTAL não for encontrada (improvável aqui, mas defensivo)
+    total_row_df = df_display_com_total[df_display_com_total['Município'] == 'TOTAL']
+    totals_for_styling = total_row_df.iloc[0] if not total_row_df.empty else pd.Series()
     
     styled_df = df_display_com_total.style.apply(
         lambda row: [aplicar_cor_social(val, col, totals_for_styling) for col, val in row.items()],
@@ -1819,37 +1865,40 @@ with tabs[1]:
             <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
             <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número de famílias afetadas por conflitos.</p>
         </div>""", unsafe_allow_html=True)
-        st.plotly_chart(fig_familias(df_display_com_total), use_container_width=True, height=400, key="familias_soc_chart")
+        if 'Famílias Afetadas' in df_display_com_total.columns:
+            st.plotly_chart(fig_familias(df_display_com_total), use_container_width=True, height=400, key="familias_soc_chart")
+        else:
+            st.error("Gráfico 'Famílias Afetadas' não pode ser gerado: coluna ausente.")
         st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
         with st.expander("Detalhes e Fonte da Figura 3.1"):
             st.write("""
             **Interpretação:**
             O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
-
             **Observações:**
             - Dados agregados por município.
             - Valores apresentados em ordem decrescente.
             - Inclui todos os tipos de conflitos registrados.
-
             **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
+
     with col_conf:
         st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem; height: 100px;">
             <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
             <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados.</p>
         </div>""", unsafe_allow_html=True)
-        st.plotly_chart(fig_conflitos(df_display_com_total), use_container_width=True, height=400, key="conflitos_soc_chart")
+        if 'Conflitos Registrados' in df_display_com_total.columns:
+            st.plotly_chart(fig_conflitos(df_display_com_total), use_container_width=True, height=400, key="conflitos_soc_chart")
+        else:
+            st.error("Gráfico 'Conflitos Registrados' não pode ser gerado: coluna ausente.")
         st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
         with st.expander("Detalhes e Fonte da Figura 3.2"):
             st.write("""
             **Interpretação:**
             O gráfico mostra o número total de conflitos agrários registrados em cada município.
-
             **Observações:**
             - Contagem total de ocorrências por município.
             - Ordenação por quantidade de conflitos.
             - Inclui todos os tipos de conflitos documentados.
-
             **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
 
@@ -1858,17 +1907,18 @@ with tabs[1]:
             <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Áreas de Conflito</h3>
             <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número de áreas de conflito por município.</p>
         </div>""", unsafe_allow_html=True)
-        st.plotly_chart(fig_areas_conflito(df_display_com_total), use_container_width=True, height=400, key="areas_conflito_soc_chart")
+        if 'Áreas de Conflito' in df_display_com_total.columns:
+            st.plotly_chart(fig_areas_conflito(df_display_com_total), use_container_width=True, height=400, key="areas_conflito_soc_chart")
+        else:
+            st.error("Gráfico 'Áreas de Conflito' não pode ser gerado: coluna ausente.")
         st.caption("Figura 3.3: Distribuição de áreas de conflito por município.")
         with st.expander("Detalhes e Fonte da Figura 3.3"):
             st.write("""
             **Interpretação:**
             O gráfico apresenta o número de áreas de conflito registradas em cada município.
-
             **Observações:**
             - Dados provenientes do arquivo CPT-PA-count.csv.
             - Ordenação por quantidade.
-
             **Fonte:** CPT - Comissão Pastoral da Terra (CPT-PA-count.csv) e *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
     
@@ -1896,7 +1946,7 @@ with tabs[1]:
         **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025; e CPT-PA-count.csv.
         """)
     st.divider()
-
+    
 with tabs[2]:
     st.header("Processos Judiciais")
     
