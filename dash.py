@@ -246,7 +246,14 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    df = pd.read_csv(caminho, low_memory=False, usecols=columns)
+    df = pd.read_csv(
+        caminho,
+        low_memory=False,
+        usecols=columns,
+        encoding='latin-1',
+        engine='python',     
+        on_bad_lines='warn'   
+    )
     
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
@@ -255,27 +262,30 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
     ]
-    existing_cols_ocorrencias = [col for col in cols_ocorrencias if col in df.columns]
-    if existing_cols_ocorrencias:
-        df["total_ocorrencias"] = df[existing_cols_ocorrencias].sum(axis=1)
-        df["total_ocorrencias"] = pd.to_numeric(df["total_ocorrencias"], downcast='integer', errors='coerce')
+    existing = [c for c in cols_ocorrencias if c in df.columns]
+    if existing:
+        df["total_ocorrencias"] = df[existing].sum(axis=1)
+        df["total_ocorrencias"] = pd.to_numeric(
+            df["total_ocorrencias"],
+            downcast='integer',
+            errors='coerce'
+        )
     else:
         df["total_ocorrencias"] = 0 
-
     for col in df.columns:
-        if df[col].dtype == 'float64':
+        dtype = df[col].dtype
+        if dtype == 'float64':
             df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
-        elif df[col].dtype == 'int64':
+        elif dtype == 'int64':
             df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-        elif df[col].dtype == 'object':
-            if len(df[col].unique()) / len(df) < 0.5:
-                 try:
+        elif dtype == 'object':
+            if df[col].nunique() / len(df) < 0.5:
+                try:
                     df[col] = df[col].astype('category')
-                 except Exception:
+                except Exception:
                     pass
 
     return df
-
 @st.cache_data
 def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
     """Carrega dados de conflitos de Excel, processa e otimiza tipos de dados."""
