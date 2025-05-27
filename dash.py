@@ -759,42 +759,36 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     )
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
-def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
-    primária = "Áreas de conflitos"
-    secundária = "total_ocorrencias"
+def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
+    coluna = "Conflitos Registrados"
+    titulo = "Conflitos Registrados por Município"
 
-    if df_csv_filtered.empty:
-        cell_values = [df_csv_filtered[col].tolist() for col in df_csv_filtered.columns]
+    if df_display.empty:
+        cell_values = [df_display[col].tolist() for col in df_display.columns]
         return go.Figure(
             data=[go.Table(
-                header=dict(values=list(df_csv_filtered.columns)),
+                header=dict(values=list(df_display.columns)),
                 cells=dict(values=cell_values)
             )]
         ).update_layout(
-            title_text="DataFrame vazio — sem colunas para plotar",
-            height=400 + 20 * len(df_csv_filtered.columns)
+            title_text="DataFrame vazio — sem dados de Conflitos Registrados",
+            height=400 + 20 * len(df_display.columns)
         )
 
-    if primária in df_csv_filtered.columns:
-        coluna = primária
-        título = "Áreas de conflitos por Município"
-    elif secundária in df_csv_filtered.columns:
-        coluna = secundária
-        título = "Total de Ocorrências por Município"
-    else:
-        cell_values = [df_csv_filtered[col].tolist() for col in df_csv_filtered.columns]
+    if coluna not in df_display.columns:
+        cell_values = [df_display[col].tolist() for col in df_display.columns]
         return go.Figure(
             data=[go.Table(
-                header=dict(values=list(df_csv_filtered.columns)),
+                header=dict(values=list(df_display.columns)),
                 cells=dict(values=cell_values)
             )]
         ).update_layout(
-            title_text="Nenhuma coluna de ocorrências encontrada — exibindo DataFrame completo",
-            height=400 + 20 * len(df_csv_filtered.columns)
+            title_text=f"Coluna '{coluna}' não encontrada — exibindo DataFrame completo",
+            height=400 + 20 * len(df_display.columns)
         )
 
     df = (
-        df_csv_filtered
+        df_display
         .sort_values(coluna, ascending=True)
         .reset_index(drop=True)
     )
@@ -835,7 +829,7 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     )
 
     fig.update_layout(height=450)
-    fig = _apply_layout(fig, title=título, title_size=18)
+    fig = _apply_layout(fig, title=titulo, title_size=18)
     return fig
     
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
@@ -1836,25 +1830,37 @@ with tabs[1]:
         <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
         <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
     </div>""", unsafe_allow_html=True)
-    st.plotly_chart(fig_ocupacoes(df_csv_raw), use_container_width=True, height=300, key="ocupacoes")
-    st.caption("Figura 3.3: Distribuição de ocupações retomadas por município.")
-    with st.expander("Detalhes e Fonte da Figura 3.3"):
-        st.write("""
-        **Interpretação:**
-        O gráfico apresenta o número de áreas onde houve processos de retomada de ocupações por município.
+st.plotly_chart(
+    fig_conflitos(df_display),
+    use_container_width=True,
+    height=300,
+    key="conflitos"
+)
+st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
+with st.expander("Detalhes e Fonte da Figura 3.3"):
+    st.write("""
+    **Interpretação:**
+    O gráfico apresenta o número de conflitos registrados em cada município.
 
-        **Observações:**
-        - Contabiliza áreas com processos de retomada concluídos
-        - Ordenação por quantidade de retomadas
-        - Permite visualizar concentração geográfica das ações
+    **Observações:**
+    - Contabiliza todos os conflitos registrados na base
+    - Ordenação por quantidade de conflitos
+    - Destaca média como linha de referência
 
-        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-        """)
+    **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+    """)
 
-    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
-        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela de Impactos Sociais</h3>
-        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.</p>
-    </div>""", unsafe_allow_html=True)
+st.markdown(
+    """<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; 
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+           <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">
+             Tabela de Impactos Sociais
+           </h3>
+           <p style="color: #666; font-size: 0.95em; margin-bottom:0;">
+             Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.
+           </p>
+       </div>""",
+    unsafe_allow_html=True)
     
     df_tabela_social = df_confmun_raw.copy()
     
