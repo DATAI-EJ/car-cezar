@@ -1717,7 +1717,6 @@ with tabs[1]:
         Esta análise apresenta dados sobre impactos sociais relacionados a conflitos agrários, incluindo:
         - Famílias afetadas
         - Conflitos registrados
-        - Ocupações retomadas
 
         Os dados são provenientes da Comissão Pastoral da Terra (CPT).
         """)
@@ -1727,27 +1726,16 @@ with tabs[1]:
         )
 
     df_tabela_social = df_confmun_raw.copy()
-    if 'df_csv_raw' in locals() and not df_csv_raw.empty:
-        if 'Município' in df_csv_raw.columns:
-            ocupacoes_por_municipio = df_csv_raw.groupby('Município', observed=False).size().reset_index(name='Ocupações_Retomadas')
-            df_tabela_social = df_tabela_social.merge(ocupacoes_por_municipio, on='Município', how='left')
-            df_tabela_social['Ocupações_Retomadas'] = df_tabela_social['Ocupações_Retomadas'].fillna(0).astype(int)
-        else:
-            df_tabela_social['Ocupações_Retomadas'] = 0
-    else:
-        df_tabela_social['Ocupações_Retomadas'] = 0
     df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
         'Total_Famílias': 'Famílias Afetadas',
-        'Número_Conflitos': 'Conflitos Registrados',
-        'Ocupações_Retomadas': 'Ocupações Retomadas'
+        'Número_Conflitos': 'Conflitos Registrados'
     })
     linha_total = pd.DataFrame({
         'Município': ['TOTAL'],
         'Famílias Afetadas': [df_display['Famílias Afetadas'].sum()],
-        'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()],
-        'Ocupações Retomadas': [df_display['Ocupações Retomadas'].sum()]
+        'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()]
     })
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
 
@@ -1758,8 +1746,6 @@ with tabs[1]:
             return 'background-color: #ffebee; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #ffebee'
         elif col == 'Conflitos Registrados':
             return 'background-color: #fff3e0; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #fff3e0'
-        elif col == 'Ocupações Retomadas':
-            return 'background-color: #e8f5e8; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #e8f5e8'
         return ''
     
     styled_df = df_display_com_total.style.apply(
@@ -1767,8 +1753,7 @@ with tabs[1]:
         axis=1
     ).format({
         'Famílias Afetadas': '{:,.0f}',
-        'Conflitos Registrados': '{:,.0f}',
-        'Ocupações Retomadas': '{:,.0f}'
+        'Conflitos Registrados': '{:,.0f}'
     })
 
     col_fam, col_conf = st.columns(2, gap="large")
@@ -1810,32 +1795,13 @@ with tabs[1]:
 
             **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
-    
-    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 2rem 0 0.5rem 0;">
-        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
-        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
+
+
+    st.markdown("---")
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 1rem 0 0.5rem 0;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela Consolidada de Impactos Sociais</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Dados consolidados de impactos sociais por município.</p>
     </div>""", unsafe_allow_html=True)
-
-    st.plotly_chart(
-        fig_conflitos(df_display_com_total),
-        use_container_width=True,
-        height=300,
-        key="conflitos_display"
-    )
-    st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
-    with st.expander("Detalhes e Fonte da Figura 3.3"):
-        st.write("""
-        **Interpretação:**
-        O gráfico apresenta o número de conflitos registrados em cada município.
-
-        **Observações:**
-        - Contabiliza todos os conflitos registrados na base
-        - Ordenação por quantidade de conflitos
-        - Destaca média como linha de referência
-
-        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-        """)
-
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
     st.caption("Tabela 3.1: Dados consolidados de impactos sociais por município.")
     with st.expander("Detalhes e Fonte da Tabela 3.1"):
@@ -1844,8 +1810,7 @@ with tabs[1]:
         A tabela apresenta os dados consolidados por município, incluindo:
         - Número de famílias afetadas por conflitos
         - Quantidade de conflitos registrados
-        - Número de ocupações retomadas
-
+        
         **Observações:**
         - Valores absolutos por município
         - Totais na última linha
