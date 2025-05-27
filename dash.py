@@ -264,15 +264,6 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
             encoding='latin-1'
         )
     
-    st.write(f"[load_csv] Colunas antes da renomeação de 'Unnamed: 0': {list(df.columns)}")
-    if "Unnamed: 0" in df.columns:
-        df = df.rename(columns={"Unnamed: 0": "Município"})
-        st.write(f"[load_csv] Colunas APÓS a tentativa de renomear 'Unnamed: 0' para 'Município': {list(df.columns)}")
-    else:
-        st.write("[load_csv] 'Unnamed: 0' NÃO encontrado nas colunas.")
-        if "Município" not in df.columns:
-            st.warning("[load_csv] ATENÇÃO: Nem 'Unnamed: 0' nem 'Município' foram encontrados inicialmente.")
-
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
