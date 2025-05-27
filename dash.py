@@ -622,28 +622,52 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     import csv
-    encoding = 'utf-8'
-    try:
-        if columns is not None:
-            with open(caminho, newline='', encoding=encoding) as f:
-                reader = csv.reader(f)
-                header = next(reader)
-            columns_present = [col for col in columns if col in header]
-        else:
-            columns_present = None
-        df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
-    except UnicodeDecodeError:
-        encoding = 'latin1'
-        if columns is not None:
-            with open(caminho, newline='', encoding=encoding) as f:
-                reader = csv.reader(f)
-                header = next(reader)
-            columns_present = [col for col in columns if col in header]
-        else:
-            columns_present = None
-        df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
+    encodings = ['utf-8', 'latin-1', 'windows-1252']
+    
+    df = None
+    encoding_usado = None
+    
+    for encoding in encodings:
+        try:
+            if columns is not None:
+                with open(caminho, newline='', encoding=encoding) as f:
+                    reader = csv.reader(f)
+                    header = next(reader)
+                columns_present = [col for col in columns if col in header]
+            else:
+                columns_present = None
+            
+            df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
+            encoding_usado = encoding
+            print(f"Arquivo lido com sucesso usando encoding: {encoding}")
+            break
+            
+        except (UnicodeDecodeError, UnicodeError):
+            print(f"Falha ao ler com encoding {encoding}, tentando próximo...")
+            continue
+        except Exception as e:
+            print(f"Erro ao ler arquivo com encoding {encoding}: {str(e)}")
+            continue
+    
+    if df is None:
+        raise ValueError(f"Não foi possível ler o arquivo {caminho} com nenhum dos encodings: {encodings}")
+
+    geometry_cols = [col for col in df.columns if 'geometr' in col.lower() or df[col].dtype.name == 'geometry']
+    if geometry_cols:
+        print(f"Removendo colunas de geometria: {geometry_cols}")
+        df = df.drop(columns=geometry_cols)
+    
+    for col in df.columns:
+        if "conflit" in col.lower():
+            df = df.rename(columns={col: "Áreas de conflitos"})
+        elif "ocupaç" in col.lower() and "retomad" in col.lower():
+            df = df.rename(columns={col: "Ocupações Retomadas"})
+    
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
+
+    print(f"Colunas disponíveis após renomeação: {list(df.columns)}")
+    
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
@@ -651,21 +675,21 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     existing_cols_ocorrencias = [col for col in cols_ocorrencias if col in df.columns]
     if existing_cols_ocorrencias:
         df["total_ocorrencias"] = df[existing_cols_ocorrencias].sum(axis=1)
+        print(f"Colunas de ocorrências encontradas: {existing_cols_ocorrencias}")
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]):
             if df[col].dtype == 'float64':
-                if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.float32())
-                else:
-                    df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
+                df[col] = df[col].astype('float32')
             elif df[col].dtype == 'int64':
                 if df[col].isnull().sum() == 0:
-                    df[col] = pa.array(df[col], type=pa.int32())
+                    df[col] = df[col].astype('int32')
                 else:
-                    df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-        elif pd.api.types.is_string_dtype(df[col]):
+                    df[col] = df[col].astype('float32')
+        elif pd.api.types.is_string_dtype(df[col]) or pd.api.types.is_object_dtype(df[col]):
+            df[col] = df[col].astype(str)
             if len(df[col].unique()) < 100:
                 df[col] = pd.Categorical(df[col])
+    
     return df
 
 @st.cache_data
@@ -1127,26 +1151,48 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
 def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
+    required_cols = ['Município']
+    missing_cols = [col for col in required_cols if col not in df_csv_filtered.columns]
+    if missing_cols:
+        st.error(f"Colunas obrigatórias não encontradas: {missing_cols}")
+        return go.Figure()
+    
+    conflict_col = None
+    possible_conflict_cols = ['Áreas de conflitos', 'Ocupações Retomadas', 'Conflitos por Terra']
+    
+    for col in possible_conflict_cols:
+        if col in df_csv_filtered.columns:
+            conflict_col = col
+            break
+    
+    if conflict_col is None:
+        st.error(f"Nenhuma das colunas esperadas foi encontrada: {possible_conflict_cols}")
+        st.info(f"Colunas disponíveis: {list(df_csv_filtered.columns)}")
+        return go.Figure()
+    
     df = (
-        df_csv_filtered
-        .sort_values('Áreas de conflitos', ascending=False)
+        df_csv_filtered[df_csv_filtered[conflict_col] > 0] 
+        .sort_values(conflict_col, ascending=False)
         .reset_index(drop=True)
     )
+    
     if df.empty:
+        st.warning("Nenhum dado encontrado para exibir no gráfico.")
         return go.Figure()
 
-    df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
+    df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(str(x), width=20))
+    
     seq = px.defaults.color_discrete_sequence
     bar_colors = [seq[i % len(seq)] for i in range(len(df))]
 
     fig = px.bar(
         df,
-        x='Áreas de conflitos',
+        x=conflict_col,
         y='Mun_wrap',
         orientation='h',
-        text='Áreas de conflitos',
+        text=conflict_col,
         labels={
-            'Áreas de conflitos': 'Ocupações Retomadas',
+            conflict_col: 'Número de Conflitos',
             'Mun_wrap': 'Município'
         },
     )
@@ -1160,7 +1206,8 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
         texttemplate='%{text:.0f}',
         textposition='outside'
     )
-    avg = df['Áreas de conflitos'].mean()
+    
+    avg = df[conflict_col].mean()
     fig.add_shape(
         type='line',
         x0=avg, x1=avg,
@@ -1174,6 +1221,7 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
         showarrow=False,
         font=dict(color='FireBrick', size=10)
     )
+    
     fig.update_layout(
         height=450,
         margin=dict(l=150, r=20, t=60, b=20)
@@ -1181,7 +1229,8 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     fig.update_yaxes(
         categoryorder='total ascending' 
     )
-    return _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
+    
+    return _apply_layout(fig, title=f"{conflict_col} por Município", title_size=18)
 
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
     df = df_conflitos_filtered.sort_values('Total_Famílias', ascending=False)
@@ -1566,7 +1615,7 @@ def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str) ->
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
 gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef', 'ha_total']
 gdf_sigef_cols = ['geometry', 'municipio', 'area_km2', 'invadindo']
-df_csv_cols = ["Unnamed: 0", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
+df_csv_cols = ["Município", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
 df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador', 'ultima_atualizaçao']
 
 @st.cache_data
