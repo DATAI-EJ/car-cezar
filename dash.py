@@ -422,43 +422,44 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
             )
             fig.add_trace(trace_sigef)
 
-    df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
-    if not df_csv_unique.empty:
-        cidades = df_csv_unique["Município"].unique()
-        paleta = px.colors.qualitative.Pastel
-        mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
-        for c in cidades:
-            df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
-            if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
-                df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
-                base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
-                outline = [max(0, s + 4) for s in base]
-                
-                fig.add_trace(go.Scattermap(
-                    lat=df_c["Latitude"],
-                    lon=df_c["Longitude"],
-                    mode="markers",
-                    marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
-                    hoverinfo="none",
-                    showlegend=False
-                ))
-                fig.add_trace(go.Scattermap(
-                    lat=df_c["Latitude"],
-                    lon=df_c["Longitude"],
-                    mode="markers",
-                    marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
-                    text=df_c.apply(
-                        lambda r: (
-                            f"Município: {r.get('Município', 'N/A')}<br>"
-                            f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
-                            f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
+    if "Município" in df_csv_filtered.columns:
+        df_csv_unique = df_csv_filtered.drop_duplicates(subset=["Município"])
+        if not df_csv_unique.empty:
+            cidades = df_csv_unique["Município"].unique()
+            paleta = px.colors.qualitative.Pastel
+            mapa_cores = {c: paleta[i % len(paleta)] for i, c in enumerate(cidades)}
+            for c in cidades:
+                df_c = df_csv_unique[df_csv_unique["Município"] == c].copy()
+                if not df_c.empty and "total_ocorrencias" in df_c.columns and "Latitude" in df_c.columns and "Longitude" in df_c.columns:
+                    df_c["total_ocorrencias"] = pd.to_numeric(df_c["total_ocorrencias"], errors='coerce').fillna(0)
+                    base = [(max(0, val) * 10) for val in df_c["total_ocorrencias"].tolist()]
+                    outline = [max(0, s + 4) for s in base]
+                    
+                    fig.add_trace(go.Scattermap(
+                        lat=df_c["Latitude"],
+                        lon=df_c["Longitude"],
+                        mode="markers",
+                        marker=dict(size=outline, color="black", sizemode="area", opacity=0.8),
+                        hoverinfo="none",
+                        showlegend=False
+                    ))
+                    fig.add_trace(go.Scattermap(
+                        lat=df_c["Latitude"],
+                        lon=df_c["Longitude"],
+                        mode="markers",
+                        marker=dict(size=base, color=mapa_cores[c], sizemode="area"),
+                        text=df_c.apply(
+                            lambda r: (
+                                f"Município: {r.get('Município', 'N/A')}<br>"
+                                f"Áreas de conflitos: {r.get('Áreas de conflitos', 'N/A')}<br>"
+                                f"Assassinatos: {r.get('Assassinatos', 'N/A')}"
+                            ),
+                            axis=1
                         ),
-                        axis=1
-                    ),
-                    hoverinfo="text",
-                    name=f"<b>Ocorrências – {c}</b>", 
-                    showlegend=True
-                ))
+                        hoverinfo="text",
+                        name=f"<b>Ocorrências – {c}</b>", 
+                        showlegend=True
+                    ))
 
     fig.update_layout(
         mapbox=dict(
@@ -1364,12 +1365,11 @@ def fig_desmatamento_mapa_pontos(gdf_alertas):
             height=600
         )
         return _apply_layout(fig, title="Distribuição Espacial dos Alertas de Desmatamento", title_size=16)
-    return go.Figure()  # Return empty figure if required columns not found
+    return go.Figure()
 
 tabs = st.tabs(["Sobreposições", "CPT", "Justiça", "Queimadas", "Desmatamento"])
 
 with tabs[0]:
-    # Carregamento sob demanda
     df_csv_raw = load_csv(
         "CPT-PA-count.csv",
         columns=df_csv_cols
