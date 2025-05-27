@@ -1817,41 +1817,41 @@ with tabs[1]:
             st.write("""
             **Interpretação:**
             O gráfico mostra o número total de conflitos agrários registrados em cada município.
-
+    
             **Observações:**
             - Contagem total de ocorrências por município
             - Ordenação por quantidade de conflitos
             - Inclui todos os tipos de conflitos documentados
-
+    
             **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
-
+    
     st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 2rem 0 0.5rem 0;">
         <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
         <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
     </div>""", unsafe_allow_html=True)
-st.plotly_chart(
-    fig_conflitos(df_display),
-    use_container_width=True,
-    height=300,
-    key="conflitos"
-)
-st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
-with st.expander("Detalhes e Fonte da Figura 3.3"):
-    st.write("""
-    **Interpretação:**
-    O gráfico apresenta o número de conflitos registrados em cada município.
-
-    **Observações:**
-    - Contabiliza todos os conflitos registrados na base
-    - Ordenação por quantidade de conflitos
-    - Destaca média como linha de referência
-
-    **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
-    """)
-
-st.markdown(
-    """<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; 
+    
+    st.plotly_chart(
+        fig_conflitos(df_display),
+        use_container_width=True,
+        height=300,
+        key="conflitos"
+    )
+    st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
+    with st.expander("Detalhes e Fonte da Figura 3.3"):
+        st.write("""
+        **Interpretação:**
+        O gráfico apresenta o número de conflitos registrados em cada município.
+    
+        **Observações:**
+        - Contabiliza todos os conflitos registrados na base
+        - Ordenação por quantidade de conflitos
+        - Destaca média como linha de referência
+    
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+        """)
+    
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; 
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">
              Tabela de Impactos Sociais
@@ -1859,18 +1859,17 @@ st.markdown(
            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">
              Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.
            </p>
-       </div>""",
-    unsafe_allow_html=True)
+       </div>""", unsafe_allow_html=True)
     
-        df_tabela_social = df_confmun_raw.copy()
+    df_tabela_social = df_confmun_raw.copy()
     
     if 'df_csv_raw' in locals() and not df_csv_raw.empty:
         if 'Município' in df_csv_raw.columns:
             ocupacoes_por_municipio = df_csv_raw.groupby('Município', observed=False).size().reset_index(name='Ocupações_Retomadas')
-            df_tabela_social = df_tabela_social.merge(ocupacoes_por_municipio, left_on='Município', right_on='Município', how='left')
+            df_tabela_social = df_tabela_social.merge(ocupacoes_por_municipio, on='Município', how='left')
             df_tabela_social['Ocupações_Retomadas'] = df_tabela_social['Ocupações_Retomadas'].fillna(0).astype(int)
         else:
-             df_tabela_social['Ocupações_Retomadas'] = 0
+            df_tabela_social['Ocupações_Retomadas'] = 0
     else:
         df_tabela_social['Ocupações_Retomadas'] = 0
     
@@ -1891,6 +1890,7 @@ st.markdown(
     })
     
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
+
     
     def aplicar_cor_social(val, col):
         if col == 'Município':
