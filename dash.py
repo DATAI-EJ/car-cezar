@@ -761,9 +761,19 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
 
 def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     coluna = "Áreas de conflitos"
-    
     if coluna not in df_csv_filtered.columns or df_csv_filtered.empty:
-        return go.Figure()
+        cell_values = [df_csv_filtered[col].tolist() for col in df_csv_filtered.columns]
+        return go.Figure(
+            data=[
+                go.Table(
+                    header=dict(values=list(df_csv_filtered.columns)),
+                    cells=dict(values=cell_values)
+                )
+            ]
+        ).update_layout(
+            title_text="Não há dados de 'Áreas de conflitos'. Exibindo todo o DataFrame carregado",
+            height=400 + 20 * len(df_csv_filtered.columns)
+        )
 
     df = (
         df_csv_filtered
@@ -781,13 +791,9 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
         y='Mun_wrap',
         orientation='h',
         text=coluna,
-        labels={
-            coluna: coluna,
-            'Mun_wrap': 'Município'
-        },
+        labels={coluna: coluna, 'Mun_wrap': 'Município'},
         color_discrete_sequence=seq
     )
-
     fig.update_traces(
         marker=dict(color=bar_colors, line_color='rgb(80,80,80)', line_width=0.5),
         texttemplate='%{text:.0f}',
@@ -811,9 +817,8 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(height=450)
     fig = _apply_layout(fig, title="Áreas de conflitos por Município", title_size=18)
-
     return fig
-
+    
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
     df = df_conflitos_filtered.sort_values('Total_Famílias', ascending=False)
     if df.empty:
