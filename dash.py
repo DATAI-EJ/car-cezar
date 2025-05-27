@@ -759,57 +759,19 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     )
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
-def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
-    coluna = "Conflitos Registrados"
-    titulo = "Conflitos Registrados por Município"
+def fig_ocupacoes(df: pd.DataFrame) -> go.Figure:
+    if df.empty or "Ocupações Retomadas" not in df.columns:
+        return go.Figure()
 
-    if df_display.empty or coluna not in df_display.columns:
-        cell_values = [df_display[col].tolist() for col in df_display.columns]
-        return go.Figure(
-            data=[go.Table(
-                header=dict(values=list(df_display.columns)),
-                cells=dict(values=cell_values)
-            )]
-        ).update_layout(
-            title_text="Dados indisponíveis — exibindo DataFrame completo",
-            height=400 + 20 * len(df_display.columns)
-        )
-
-    df = df_display.sort_values(coluna, ascending=True).reset_index(drop=True)
-    df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
-    seq = PASTEL_SEQ
-    bar_colors = [seq[i % len(seq)] for i in range(len(df))]
-
+    df = df.sort_values("Ocupações Retomadas", ascending=False)
     fig = px.bar(
         df,
-        x=coluna,
-        y='Mun_wrap',
-        orientation='h',
-        text=coluna,
-        labels={coluna: coluna, 'Mun_wrap': 'Município'},
-        color_discrete_sequence=seq
+        x="Município",
+        y="Ocupações Retomadas",
+        title="Ocupações Retomadas por Município",
+        labels={"Ocupações Retomadas": "Qtd. Ocupações"},
+        template="plotly_white"
     )
-    fig.update_traces(
-        marker=dict(color=bar_colors, line_color='rgb(80,80,80)', line_width=0.5),
-        texttemplate='%{text:.0f}',
-        textposition='outside'
-    )
-    avg = df[coluna].mean()
-    fig.add_shape(
-        type='line',
-        x0=avg, x1=avg,
-        yref='paper', y0=0, y1=1,
-        line=dict(color='FireBrick', width=2, dash='dash')
-    )
-    fig.add_annotation(
-        x=avg, y=1.02,
-        xref='x', yref='paper',
-        text=f"Média = {avg:.1f}",
-        showarrow=False,
-        font=dict(color='FireBrick', size=10)
-    )
-    fig.update_layout(height=450)
-    fig = _apply_layout(fig, title=titulo, title_size=18)
     return fig
     
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
