@@ -760,44 +760,41 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
 def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
+    coluna = "Áreas de conflitos"
+    
+    if coluna not in df_csv_filtered.columns or df_csv_filtered.empty:
+        return go.Figure()
+
     df = (
         df_csv_filtered
-        .sort_values('Áreas de conflitos', ascending=True)
+        .sort_values(coluna, ascending=True)
         .reset_index(drop=True)
     )
-    if df.empty:
-        return go.Figure()
 
     df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
     seq = PASTEL_SEQ
     bar_colors = [seq[i % len(seq)] for i in range(len(df))]
 
-    y_vals = df['Mun_wrap'].tolist() if hasattr(df['Mun_wrap'], 'tolist') else list(df['Mun_wrap'])
-    x_vals = df['Áreas de conflitos'].tolist() if hasattr(df['Áreas de conflitos'], 'tolist') else list(df['Áreas de conflitos'])
-
     fig = px.bar(
         df,
-        x='Áreas de conflitos',
+        x=coluna,
         y='Mun_wrap',
         orientation='h',
-        text='Áreas de conflitos',
+        text=coluna,
         labels={
-            'Áreas de conflitos': 'Ocupações Retomadas',
+            coluna: coluna,
             'Mun_wrap': 'Município'
         },
         color_discrete_sequence=seq
     )
 
     fig.update_traces(
-        marker=dict(
-            color=bar_colors,
-            line_color='rgb(80,80,80)',
-            line_width=0.5
-        ),
+        marker=dict(color=bar_colors, line_color='rgb(80,80,80)', line_width=0.5),
         texttemplate='%{text:.0f}',
         textposition='outside'
     )
-    avg = df['Áreas de conflitos'].mean()
+
+    avg = df[coluna].mean()
     fig.add_shape(
         type='line',
         x0=avg, x1=avg,
@@ -811,8 +808,9 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
         showarrow=False,
         font=dict(color='FireBrick', size=10)
     )
+
     fig.update_layout(height=450)
-    fig = _apply_layout(fig, title="Ocupações Retomadas por Município", title_size=18)
+    fig = _apply_layout(fig, title="Áreas de conflitos por Município", title_size=18)
 
     return fig
 
