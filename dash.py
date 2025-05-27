@@ -1710,139 +1710,164 @@ with tabs[0]:
     st.divider()
 
 with tabs[1]:
+    df_csv_raw = load_csv(
+        "CPT-PA-count.csv",
+        columns=df_csv_cols
+    )
+    
     st.header("Impacto Social")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
         Esta análise apresenta dados sobre impactos sociais relacionados a conflitos agrários, incluindo:
         - Famílias afetadas
         - Conflitos registrados
-        - Áreas de conflito
+        - Ocupações retomadas
 
-        Os dados são provenientes da Comissão Pastoral da Terra (CPT). 
-        A coluna 'Áreas de conflito' é originária do arquivo CPT-PA-count.csv.
+        Os dados são provenientes da Comissão Pastoral da Terra (CPT).
         """)
         st.markdown(
             "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.",
             unsafe_allow_html=True
         )
 
+    col_fam, col_conf = st.columns(2, gap="large")
+    with col_fam:
+        st.markdown("""<div style="
+            background-color: #fff;
+            border-radius: 6px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 0.5rem;">
+            <h3 style="
+                color: #1E1E1E;
+                margin-top: 0;
+                margin-bottom: 0.5rem;
+                font-size: 1.5rem;
+                border-bottom: 2px solid #E0E0E0;
+                padding-bottom: 0.3rem;">
+            Famílias Afetadas</h3>
+            <p style="
+                color: #666;
+                font-size: 0.95em;
+                margin-bottom:0;
+                line-height: 1.4;">
+            Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
+        </div>""", unsafe_allow_html=True)
+        st.info("Arquivo de famílias afetadas por município (Excel) não encontrado. Exiba apenas dados do CSV.")
+    with col_conf:
+        st.markdown("""<div style="
+            background-color: #fff;
+            border-radius: 6px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 0.5rem;">
+            <h3 style="
+                color: #1E1E1E;
+                margin-top: 0;
+                margin-bottom: 0.5rem;
+                font-size: 1.5rem;
+                border-bottom: 2px solid #E0E0E0;
+                padding-bottom: 0.3rem;">
+            Conflitos Registrados</h3>
+            <p style="
+                color: #666;
+                font-size: 0.95em;
+                margin-bottom:0;
+                line-height: 1.4;">
+            Número total de conflitos agrários registrados por município.</p>
+        </div>""", unsafe_allow_html=True)
+        st.info("Arquivo de famílias afetadas por município (Excel) não encontrado. Exiba apenas dados do CSV.")
+    
+    st.divider()
+    
+    st.markdown("""
+    <div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+    <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Ocupações Retomadas</h3>
+    <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Análise das áreas de conflito com processos de retomada por município.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.plotly_chart(fig_ocupacoes(df_csv_raw), use_container_width=True, height=300, key="ocupacoes")
+    st.caption("Figura 3.3: Distribuição de ocupações retomadas por município.")
+    with st.expander("Detalhes e Fonte da Figura 3.3"):
+        st.write("""
+        **Interpretação:**
+        O gráfico apresenta o número de áreas onde houve processos de retomada de ocupações por município.
+
+        **Observações:**
+        - Contabiliza áreas com processos de retomada concluídos
+        - Ordenação por quantidade de retomadas
+        - Permite visualizar concentração geográfica das ações
+
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
+        """)
+
+    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
+        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela de Impactos Sociais</h3>
+        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Visualização unificada dos dados de conflitos, famílias afetadas e ocupações retomadas.</p>
+    </div>""", unsafe_allow_html=True)
+    
+    # Load data from Excel file for families affected
+    df_confmun_raw = carregar_dados_conflitos_municipio("CPTF-PA.xlsx")
     df_tabela_social = df_confmun_raw.copy()
-
-    # Merge com os dados de 'Áreas de conflito' do CSV
-    if not df_areas_conflito_data.empty:
-        df_tabela_social = df_tabela_social.merge(df_areas_conflito_data, on='Município', how='left')
-        # Preencher NaN com 0 para municípios que não estão no CSV de áreas de conflito
-        df_tabela_social['Areas_Conflito_Source'] = df_tabela_social['Areas_Conflito_Source'].fillna(0).astype(int)
-    elif 'Areas_Conflito_Source' not in df_tabela_social.columns : # Garante que a coluna exista mesmo se df_areas_conflito_data for vazio
-        df_tabela_social['Areas_Conflito_Source'] = 0 
-
+    
+    # Remove geometry column if it exists to avoid Arrow conversion issues
+    if 'Geometria' in df_tabela_social.columns:
+        df_tabela_social = df_tabela_social.drop('Geometria', axis=1)
+    
+    # Calculate occupations per municipality from CSV data
+    if 'df_csv_raw' in locals() and not df_csv_raw.empty:
+        if 'Município' in df_csv_raw.columns:
+            ocupacoes_por_municipio = df_csv_raw.groupby('Município', observed=False).size().reset_index(name='Ocupações_Retomadas')
+            df_tabela_social = df_tabela_social.merge(ocupacoes_por_municipio, left_on='Município', right_on='Município', how='left')
+            df_tabela_social['Ocupações_Retomadas'] = df_tabela_social['Ocupações_Retomadas'].fillna(0).astype(int)
+        else:
+             df_tabela_social['Ocupações_Retomadas'] = 0
+    else:
+        df_tabela_social['Ocupações_Retomadas'] = 0
+    
+    # Sort by Total_Famílias column
     df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
     
+    # Create display dataframe with proper column mapping
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
         'Total_Famílias': 'Famílias Afetadas',
         'Número_Conflitos': 'Conflitos Registrados',
-        'Areas_Conflito_Source': 'Áreas de Conflito' # Renomeação para exibição
+        'Ocupações_Retomadas': 'Ocupações Retomadas'
     })
     
-    # Verificar se a coluna 'Áreas de Conflito' existe antes de somar
-    soma_areas_conflito = 0
-    if 'Áreas de Conflito' in df_display.columns:
-        soma_areas_conflito = df_display['Áreas de Conflito'].sum()
-
-    linha_total_dict = {
+    # Create total row
+    linha_total = pd.DataFrame({
         'Município': ['TOTAL'],
         'Famílias Afetadas': [df_display['Famílias Afetadas'].sum()],
         'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()],
-        'Áreas de Conflito': [soma_areas_conflito]
-    }
+        'Ocupações Retomadas': [df_display['Ocupações Retomadas'].sum()]
+    })
     
-    linha_total = pd.DataFrame(linha_total_dict)
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
-
-    def aplicar_cor_social(val, col_name, totals_row_series):
-        is_total_row_val = False
-        if col_name in totals_row_series.index: # Verifica se a coluna existe na série de totais
-             is_total_row_val = (val == totals_row_series[col_name])
-        
-        base_style = ""
-        if col_name == 'Município':
-            return 'background-color: #f0f0f0; font-weight: bold;' if val == 'TOTAL' else ''
-        elif col_name == 'Famílias Afetadas':
-            base_style = 'background-color: #ffebee'
-        elif col_name == 'Conflitos Registrados':
-            base_style = 'background-color: #fff3e0'
-        elif col_name == 'Áreas de Conflito':
-            base_style = 'background-color: #e3f2fd' # Light blue
-        
-        if val == 'TOTAL' and col_name == 'Município': # Caso especial para a célula TOTAL em Município
-             return base_style + '; font-weight: bold;'
-        elif is_total_row_val and df_display_com_total.loc[df_display_com_total['Município'] == 'TOTAL', col_name].iloc[0] == val:
-             return base_style + '; font-weight: bold;'
-        return base_style
-
-    totals_for_styling = df_display_com_total[df_display_com_total['Município'] == 'TOTAL'].iloc[0] if not df_display_com_total.empty else pd.Series()
-
+    
+    def aplicar_cor_social(val, col):
+        if col == 'Município':
+            return 'background-color: #f0f0f0' if val == 'TOTAL' else ''
+        elif col == 'Famílias Afetadas':
+            return 'background-color: #ffebee; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #ffebee'
+        elif col == 'Conflitos Registrados':
+            return 'background-color: #fff3e0; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #fff3e0'
+        elif col == 'Ocupações Retomadas':
+            return 'background-color: #e8f5e8; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #e8f5e8'
+        return ''
+    
     styled_df = df_display_com_total.style.apply(
-        lambda row: [aplicar_cor_social(val, col, totals_for_styling) for col, val in row.items()],
+        lambda x: [aplicar_cor_social(val, col) for val, col in zip(x, df_display_com_total.columns)], 
         axis=1
     ).format({
         'Famílias Afetadas': '{:,.0f}',
         'Conflitos Registrados': '{:,.0f}',
-        'Áreas de Conflito': '{:,.0f}'
+        'Ocupações Retomadas': '{:,.0f}'
     })
-
-    col_fam, col_conf, col_areas = st.columns(3, gap="large")
-
-    with col_fam:
-        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem; height: 100px;">
-            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número de famílias afetadas por conflitos.</p>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(plot_bar_chart(df_display_com_total, y_col='Famílias Afetadas', title="Famílias Afetadas por Município"), use_container_width=True, height=400, key="familias_chart")
-        st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
-        with st.expander("Detalhes e Fonte da Figura 3.1"):
-            st.write("""
-            **Interpretação:** O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
-            **Observações:** Dados agregados por município. Valores em ordem decrescente.
-            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*.
-            """)
-            
-    with col_conf:
-        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem; height: 100px;">
-            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados.</p>
-        </div>""", unsafe_allow_html=True)
-        st.plotly_chart(plot_bar_chart(df_display_com_total, y_col='Conflitos Registrados', title="Conflitos Registrados por Município"), use_container_width=True, height=400, key="conflitos_chart")
-        st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
-        with st.expander("Detalhes e Fonte da Figura 3.2"):
-            st.write("""
-            **Interpretação:** O gráfico mostra o número total de conflitos agrários registrados em cada município.
-            **Observações:** Contagem total de ocorrências. Ordenação por quantidade.
-            **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*.
-            """)
-
-    with col_areas: 
-        st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem; height: 100px;">
-            <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Áreas de Conflito</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número de áreas de conflito por município.</p>
-        </div>""", unsafe_allow_html=True)
-        # Passar df_display_com_total que contém a coluna 'Áreas de Conflito'
-        st.plotly_chart(plot_bar_chart(df_display_com_total, y_col='Áreas de Conflito', title="Áreas de Conflito por Município"), use_container_width=True, height=400, key="areas_conflito_chart")
-        st.caption("Figura 3.3: Distribuição de áreas de conflito por município.")
-        with st.expander("Detalhes e Fonte da Figura 3.3"):
-            st.write("""
-            **Interpretação:** O gráfico apresenta o número de áreas de conflito registradas em cada município.
-            **Observações:** Dados provenientes do arquivo CPT-PA-count.csv. Ordenação por quantidade.
-            **Fonte:** CPT - Comissão Pastoral da Terra (CPT-PA-count.csv) e *Conflitos no Campo Brasil*.
-            """)
     
-    st.markdown("---") 
-    st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 1rem 0 0.5rem 0;">
-        <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Tabela Consolidada de Impactos Sociais</h3>
-        <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Dados consolidados de impactos sociais por município.</p>
-    </div>""", unsafe_allow_html=True)
     st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    
     st.caption("Tabela 3.1: Dados consolidados de impactos sociais por município.")
     with st.expander("Detalhes e Fonte da Tabela 3.1"):
         st.write("""
@@ -1850,17 +1875,18 @@ with tabs[1]:
         A tabela apresenta os dados consolidados por município, incluindo:
         - Número de famílias afetadas por conflitos
         - Quantidade de conflitos registrados
-        - Número de áreas de conflito (do arquivo CPT-PA-count.csv)
+        - Número de ocupações retomadas
 
         **Observações:**
         - Valores absolutos por município
         - Totais na última linha
         - Células coloridas por tipo de dado
-        - Ordenação inicial por número de famílias afetadas
+        - Ordenação por número de famílias afetadas
 
-        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil* e CPT-PA-count.csv.
+        **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
         """)
     st.divider()
+
 
     @st.cache_data
     def convert_df_to_csv(df_to_convert):
