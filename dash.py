@@ -810,24 +810,18 @@ def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
 
     return fig
 
-def fig_conflitos(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
-    df = df_conflitos_filtered.sort_values('Número_Conflitos', ascending=False)
-    if df.empty:
-        return go.Figure() 
+def fig_conflitos(df: pd.DataFrame) -> go.Figure:
+    if df.empty or "Número_Conflitos" not in df.columns:
+        return go.Figure()
 
+    df = df.sort_values("Número_Conflitos", ascending=False)
     fig = px.bar(
-        df, x='Número_Conflitos', y='Município', orientation='h',
-        text='Número_Conflitos'
-    )
-    fig = _apply_layout(fig, title="Conflitos Registrados")
-    fig.update_layout(
-        yaxis=dict(autorange="reversed")
-    )
-    fig.update_traces(
-        texttemplate='%{text:.0f}',
-        textposition='outside',
-        marker_line_color='rgb(80,80,80)',
-        marker_line_width=0.5
+        df,
+        x="Município",
+        y="Número_Conflitos",
+        title="Conflitos Registrados por Município",
+        labels={"Número_Conflitos": "Conflitos"},
+        template="plotly_white"
     )
     return fig
 
