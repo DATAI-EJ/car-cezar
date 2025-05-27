@@ -301,8 +301,10 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
     if df is None:
         raise ValueError(f"Não foi possível ler o arquivo {caminho} com nenhum dos encodings: {encodings}")
     
-    if 'Ãreas de conflitos' in df.columns:
-        df = df.rename(columns={'Ãreas de conflitos': 'Áreas de conflitos'})
+    df = pd.read_csv(caminho, usecols=columns_present, engine='pyarrow', encoding=encoding)
+    for col in df.columns:
+        if "conflit" in col.lower():
+            df = df.rename(columns={col: "Áreas de conflitos"})
         
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
@@ -1623,7 +1625,6 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
     gdf_unificado = gdf_unificado.rename(columns={k: v for k, v in colunas_exibir.items() if k in colunas_presentes})
 
     st.dataframe(gdf_unificado, use_container_width=True)
-
 
 def fig_desmatamento_uc(gdf_cnuc, gdf_alertas):
     gdf_uc_alertas = gdf_alertas.dissolve(by="nome_uc", aggfunc="sum", as_index=False)
