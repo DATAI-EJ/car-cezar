@@ -1233,19 +1233,19 @@ def fig_ocupacoes(df_csv_filtered: pd.DataFrame) -> go.Figure:
     return _apply_layout(fig, title=f"{conflict_col} por Município", title_size=18)
 
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
-    df = df_conflitos_filtered.sort_values('Total_Famílias', ascending=False)
+    df = df_conflitos_filtered.sort_values('Famílias', ascending=False)
     if df.empty:
         return go.Figure()
 
-    max_val = df['Total_Famílias'].max()
+    max_val = df['Famílias'].max()
 
     fig = px.bar(
         df,
-        x='Total_Famílias',
+        x='Famílias',
         y='Município',
         orientation='h',
-        text='Total_Famílias',
-        labels={'Total_Famílias': 'Total de Famílias', 'Município': ''}
+        text='Famílias',
+        labels={'Famílias': 'Total de Famílias', 'Município': ''}
     )
     fig = _apply_layout(fig, title="Famílias Afetadas")
 
@@ -2076,11 +2076,11 @@ with tabs[1]:
     else:
         df_tabela_social['Ocupações_Retomadas'] = 0
     
-    df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
+    df_tabela_social = df_tabela_social.sort_values('Famílias', ascending=False)
     
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
-        'Total_Famílias': 'Famílias Afetadas',
+        'Famílias': 'Famílias Afetadas',
         'Número_Conflitos': 'Conflitos Registrados',
         'Ocupações_Retomadas': 'Ocupações Retomadas'
     })
