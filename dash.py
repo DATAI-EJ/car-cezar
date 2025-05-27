@@ -246,7 +246,6 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 @st.cache_data
 def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
-    st.write(f"[load_csv] Tentando carregar: {caminho}")
     usecols_arg = None
     if columns is not None:
         usecols_arg = lambda col: col in columns
@@ -291,7 +290,6 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
                     df[col] = df[col].astype('category')
                 except Exception:
                     pass
-    st.write(f"[load_csv] Colunas finais retornadas para {caminho}: {list(df.columns)}")
     return df
     
 @st.cache_data
