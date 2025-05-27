@@ -1223,16 +1223,22 @@ def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
     
     return df
 
-# --- Definições de Funções para Lazy Loading ---
-
 def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
     st.write("### Tabela Unificada de Dados")
     
-    # Unindo os dados em um único GeoDataFrame para exibição
+    for gdf, nome in [(gdf_alertas, "alertas"), (gdf_sigef, "sigef"), (gdf_cnuc, "cnuc")]:
+        if "geometry" not in gdf.columns:
+            st.error(f"Coluna 'geometry' ausente em {nome}. Não é possível unir os dados.")
+            return
+        if "municipio" not in gdf.columns:
+            if "MUNICIPIO" in gdf.columns:
+                gdf["municipio"] = gdf["MUNICIPIO"]
+            else:
+                gdf["municipio"] = None
+
     gdf_unificado = gdf_alertas.merge(gdf_sigef, on=["geometry", "municipio"], how="outer", suffixes=("_alertas", "_sigef"))
     gdf_unificado = gdf_unificado.merge(gdf_cnuc, on=["geometry", "municipio"], how="outer", suffixes=("", "_cnuc"))
 
-    # Selecionando e renomeando colunas relevantes para exibição
     colunas_exibir = {
         "geometry": "Geometria",
         "municipio": "Município",
@@ -1250,8 +1256,10 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
         "VPRESSAO": "Vetor Pressão"
     }
 
-    gdf_unificado = gdf_unificado[list(colunas_exibir.keys())]
-    gdf_unificado = gdf_unificado.rename(columns=colunas_exibir)
+    # Apenas manter colunas que existem no DataFrame resultante
+    colunas_presentes = [col for col in colunas_exibir.keys() if col in gdf_unificado.columns]
+    gdf_unificado = gdf_unificado[colunas_presentes]
+    gdf_unificado = gdf_unificado.rename(columns={k: v for k, v in colunas_exibir.items() if k in colunas_presentes})
 
     # Exibindo a tabela com opção de download
     st.dataframe(gdf_unificado, use_container_width=True)
@@ -1307,11 +1315,9 @@ def fig_desmatamento_uc(gdf_cnuc, gdf_alertas):
     return _apply_layout(fig, title="Área de Alertas de Desmatamento por UC", title_size=16)
 
 def fig_desmatamento_temporal(gdf_alertas):
-    # Agrupamento mensal
     gdf_alertas['DATADETEC'] = pd.to_datetime(gdf_alertas['DATADETEC'], errors='coerce')
     gdf_mensal = gdf_alertas.resample('M', on='DATADETEC').sum().reset_index()
 
-    # Gráfico
     fig = px.line(
         gdf_mensal,
         x='DATADETEC',
@@ -1333,9 +1339,7 @@ def fig_desmatamento_temporal(gdf_alertas):
     return _apply_layout(fig, title="Evolução Mensal da Área de Alertas de Desmatamento", title_size=16)
 
 def fig_desmatamento_mapa_pontos(gdf_alertas):
-    # Convert MUNICIPIO coordinates to point coordinates if needed
     if 'MUNICIPIO' in gdf_alertas.columns and 'geometry' in gdf_alertas.columns:
-        # Use centroid of geometries for point locations
         gdf_points = gdf_alertas.copy()
         gdf_points['centroid'] = gdf_points.geometry.centroid
         gdf_points['Latitude'] = gdf_points.centroid.y
@@ -1345,7 +1349,7 @@ def fig_desmatamento_mapa_pontos(gdf_alertas):
             gdf_points,
             lat='Latitude',
             lon='Longitude',
-            color='AREAHA',  # Use area instead of RiscoFogo
+            color='AREAHA', 
             size='AREAHA',
             hover_name='MUNICIPIO',
             hover_data=['ANODETEC', 'CODEALERTA', 'AREAHA'],
