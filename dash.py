@@ -763,7 +763,7 @@ def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
     coluna = "Conflitos Registrados"
     titulo = "Conflitos Registrados por Município"
 
-    if df_display.empty:
+    if df_display.empty or coluna not in df_display.columns:
         cell_values = [df_display[col].tolist() for col in df_display.columns]
         return go.Figure(
             data=[go.Table(
@@ -771,30 +771,12 @@ def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
                 cells=dict(values=cell_values)
             )]
         ).update_layout(
-            title_text="DataFrame vazio — sem dados de Conflitos Registrados",
+            title_text="Dados indisponíveis — exibindo DataFrame completo",
             height=400 + 20 * len(df_display.columns)
         )
 
-    if coluna not in df_display.columns:
-        cell_values = [df_display[col].tolist() for col in df_display.columns]
-        return go.Figure(
-            data=[go.Table(
-                header=dict(values=list(df_display.columns)),
-                cells=dict(values=cell_values)
-            )]
-        ).update_layout(
-            title_text=f"Coluna '{coluna}' não encontrada — exibindo DataFrame completo",
-            height=400 + 20 * len(df_display.columns)
-        )
-
-    df = (
-        df_display
-        .sort_values(coluna, ascending=True)
-        .reset_index(drop=True)
-    )
-
+    df = df_display.sort_values(coluna, ascending=True).reset_index(drop=True)
     df['Mun_wrap'] = df['Município'].apply(lambda x: wrap_label(x, width=20))
-
     seq = PASTEL_SEQ
     bar_colors = [seq[i % len(seq)] for i in range(len(df))]
 
@@ -812,7 +794,6 @@ def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
         texttemplate='%{text:.0f}',
         textposition='outside'
     )
-
     avg = df[coluna].mean()
     fig.add_shape(
         type='line',
@@ -827,7 +808,6 @@ def fig_conflitos(df_display: pd.DataFrame) -> go.Figure:
         showarrow=False,
         font=dict(color='FireBrick', size=10)
     )
-
     fig.update_layout(height=450)
     fig = _apply_layout(fig, title=titulo, title_size=18)
     return fig
@@ -1835,7 +1815,7 @@ with tabs[1]:
         fig_conflitos(df_display),
         use_container_width=True,
         height=300,
-        key="conflitos"
+        key="conflitos_display"
     )
     st.caption("Figura 3.3: Distribuição de conflitos registrados por município.")
     with st.expander("Detalhes e Fonte da Figura 3.3"):
@@ -1891,7 +1871,6 @@ with tabs[1]:
     
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
 
-    
     def aplicar_cor_social(val, col):
         if col == 'Município':
             return 'background-color: #f0f0f0' if val == 'TOTAL' else ''
