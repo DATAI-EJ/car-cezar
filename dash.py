@@ -245,32 +245,39 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gdf2
 
 @st.cache_data
-def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
+def load_csv(uploaded_file, columns: list[str] = None) -> pd.DataFrame:
     usecols_arg = None
     if columns is not None:
         usecols_arg = lambda col: col in columns
 
     try:
         df = pd.read_csv(
-            caminho,
+            uploaded_file,
             low_memory=False,
             usecols=usecols_arg
         )
     except UnicodeDecodeError:
+        uploaded_file.seek(0)
         df = pd.read_csv(
-            caminho,
+            uploaded_file,
             low_memory=False,
             usecols=usecols_arg,
             encoding='latin-1'
         )
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo CSV: {e}")
+        return pd.DataFrame()
+
 
     if "Unnamed: 0" in df.columns:
         df = df.rename(columns={"Unnamed: 0": "Município"})
+    
     cols_ocorrencias = [
         "Áreas de conflitos", "Assassinatos", "Conflitos por Terra",
         "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo"
     ]
     existing = [c for c in cols_ocorrencias if c in df.columns]
+    
     if existing:
         df["total_ocorrencias"] = df[existing].sum(axis=1)
         df["total_ocorrencias"] = pd.to_numeric(
@@ -279,7 +286,7 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
             errors='coerce'
         )
     else:
-        df["total_ocorrencias"] = 0 
+        df["total_ocorrencias"] = 0
 
     for col in df.columns:
         dtype = df[col].dtype
@@ -293,35 +300,65 @@ def load_csv(caminho: str, columns: list[str] = None) -> pd.DataFrame:
                     df[col] = df[col].astype('category')
                 except Exception:
                     pass
-
     return df
     
 @st.cache_data
 def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
-    """Carrega dados de conflitos de Excel, processa e otimiza tipos de dados."""
-    df = pd.read_excel(arquivo_excel, sheet_name='Áreas em Conflito', usecols=['mun', 'Famílias', 'Nome do Conflito']).dropna(how='all')
-    
-    df['mun'] = df['mun'].apply(lambda x: [
-        unicodedata.normalize('NFD', str(m).lower()).encode('ascii','ignore').decode().strip().title()
-        for m in str(x).split(',')
+    try:
+        df = pd.read_excel(arquivo_excel, sheet_name='Áreas em Conflito', usecols=['mun', 'Famílias', 'Nome do Conflito']).dropna(how='all')
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo Excel de conflitos: {e}")
+        return pd.DataFrame()
+
+    lista_original = ['SÃO FÉLIX DO XINGU', 'ALTAMIRA', 'ITAITUBA',
+                      'JACAREACANGA', 'NOVO PROGRESSO']
+
+    def clean_mun_name(name):
+        if pd.isna(name):
+            return None
+        name = str(name).strip().lower()
+        name = unicodedata.normalize('NFD', name).encode('ascii', 'ignore').decode('utf-8')
+        return name
+
+    lista_limpa = [clean_mun_name(m) for m in lista_original]
+    lista_limpa = [m for m in lista_limpa if m is not None] 
+
+    df['mun_limpo_list'] = df['mun'].apply(lambda x: [
+        clean_mun_name(m) for m in str(x).replace(';', ',').split(',')
     ])
-    df2 = df.explode('mun')
-    df2['Famílias'] = pd.to_numeric(df2['Famílias'], errors='coerce').fillna(0)
-    df2['Famílias'] = pd.to_numeric(df2['Famílias'], downcast='integer', errors='coerce')
+    df_exploded = df.explode('mun_limpo_list')
+    df_exploded = df_exploded[df_exploded['mun_limpo_list'].notna() & (df_exploded['mun_limpo_list'] != '')].copy()
+    df_filtered = df_exploded[df_exploded['mun_limpo_list'].isin(lista_limpa)].copy()
 
-    df2['num_mun'] = df2.groupby('Nome do Conflito', observed=False)['mun'].transform('nunique')
-    df2['Fam_por_mun'] = df2['Famílias'] / df2['num_mun']
-    
-    df2['num_mun'] = pd.to_numeric(df2['num_mun'], downcast='integer', errors='coerce')
-    df2['Fam_por_mun'] = pd.to_numeric(df2['Fam_por_mun'], downcast='float', errors='coerce')
+    if df_filtered.empty:
+        st.warning("Nenhum município da lista de interesse encontrado nos dados de conflitos após a limpeza.")
+        return pd.DataFrame(columns=['Município', 'Total_Famílias', 'Número_Conflitos'])
 
-    res = df2.groupby('mun', observed=False).agg({'Fam_por_mun':'sum','Nome do Conflito':'count'}).reset_index()
-    res.columns = ['Município','Total_Famílias','Número_Conflitos']
- 
+    df_filtered['Famílias'] = pd.to_numeric(df_filtered['Famílias'], errors='coerce').fillna(0)
+    df_filtered['Famílias'] = pd.to_numeric(df_filtered['Famílias'], downcast='integer', errors='coerce')
+    conflitos_presentes = df_filtered['Nome do Conflito'].unique()
+    df_conflitos_relevantes = df_exploded[df_exploded['Nome do Conflito'].isin(conflitos_presentes)].copy()
+
+    df_conflitos_relevantes['num_mun'] = df_conflitos_relevantes.groupby('Nome do Conflito', observed=False)['mun_limpo_list'].transform('nunique')
+    df_conflitos_relevantes['Fam_por_mun'] = df_conflitos_relevantes['Famílias'] / df_conflitos_relevantes['num_mun']
+
+    df_conflitos_relevantes['num_mun'] = pd.to_numeric(df_conflitos_relevantes['num_mun'], downcast='integer', errors='coerce')
+    df_conflitos_relevantes['Fam_por_mun'] = pd.to_numeric(df_conflitos_relevantes['Fam_por_mun'], downcast='float', errors='coerce')
+
+    res = df_conflitos_relevantes.groupby('mun_limpo_list', observed=False).agg({
+        'Fam_por_mun':'sum', 
+        'Nome do Conflito':'count'
+    }).reset_index()
+
+    res.columns = ['Município_Limpo','Total_Famílias','Número_Conflitos']
+    res = res.rename(columns={'Município_Limpo': 'Município'})
+    cleaned_to_original_map = {clean_mun_name(orig): orig.title() for orig in lista_original}
+    res['Município'] = res['Município'].map(cleaned_to_original_map).fillna(res['Município']) 
+
     res['Total_Famílias'] = pd.to_numeric(res['Total_Famílias'], downcast='integer', errors='coerce')
     res['Número_Conflitos'] = pd.to_numeric(res['Número_Conflitos'], downcast='integer', errors='coerce')
-    
-    if len(res['Município'].unique()) / len(res) < 0.5:
+
+    if not res.empty and len(res['Município'].unique()) / len(res) < 0.5:
         try:
             res['Município'] = res['Município'].astype('category')
         except Exception:
@@ -758,21 +795,6 @@ def fig_car_por_uc_donut(gdf_cnuc_ha_filtered: gpd.GeoDataFrame, nome_uc: str, m
     )
     return _apply_layout(fig, title=f"Ocupação do CAR em: {nome_uc}", title_size=16)
 
-def fig_ocupacoes(df: pd.DataFrame) -> go.Figure:
-    if df.empty or "Ocupações Retomadas" not in df.columns:
-        return go.Figure()
-
-    df = df.sort_values("Ocupações Retomadas", ascending=False)
-    fig = px.bar(
-        df,
-        x="Município",
-        y="Ocupações Retomadas",
-        title="Ocupações Retomadas por Município",
-        labels={"Ocupações Retomadas": "Qtd. Ocupações"},
-        template="plotly_white"
-    )
-    return fig
-    
 def fig_familias(df_conflitos_filtered: pd.DataFrame) -> go.Figure:
     df = df_conflitos_filtered.sort_values('Total_Famílias', ascending=False)
     if df.empty:
@@ -1515,8 +1537,8 @@ centro = {
     "lon": (limites[0] + limites[2]) / 2
 }
 
-df_csv_raw     = load_csv(
-    r"CPT-PA-count.csv",
+df_csv_raw = load_csv(
+    r"CPT-PA-count.csv", 
     columns=df_csv_cols
 )
 df_confmun_raw = carregar_dados_conflitos_municipio(
@@ -1717,6 +1739,7 @@ with tabs[1]:
         Esta análise apresenta dados sobre impactos sociais relacionados a conflitos agrários, incluindo:
         - Famílias afetadas
         - Conflitos registrados
+        - Ocupações retomadas
 
         Os dados são provenientes da Comissão Pastoral da Terra (CPT).
         """)
@@ -1726,16 +1749,45 @@ with tabs[1]:
         )
 
     df_tabela_social = df_confmun_raw.copy()
+
+    df_csv_cleaned = df_csv_raw.copy()
+    if 'Município' in df_csv_cleaned.columns:
+        df_csv_cleaned['Município'] = df_csv_cleaned['Município'].apply(lambda x: str(x).strip().title() if pd.notna(x) else None)
+
+    if 'Município' in df_tabela_social.columns:
+         df_tabela_social['Município'] = df_tabela_social['Município'].apply(lambda x: str(x).strip().title() if pd.notna(x) else None)
+
+    csv_cols_to_merge = ['Município']
+    if 'Ocupações Retomadas' in df_csv_cleaned.columns:
+        csv_cols_to_merge.append('Ocupações Retomadas')
+
+    if len(csv_cols_to_merge) > 1:
+        df_csv_agg = df_csv_cleaned[csv_cols_to_merge].groupby('Município', observed=False).sum().reset_index()
+        df_tabela_social = df_tabela_social.merge(df_csv_agg, on='Município', how='left').fillna(0)
+    else:
+        if 'Ocupações Retomadas' not in df_tabela_social.columns:
+            df_tabela_social['Ocupações Retomadas'] = 0
+
+
     df_tabela_social = df_tabela_social.sort_values('Total_Famílias', ascending=False)
+
     df_display = df_tabela_social.rename(columns={
         'Município': 'Município',
         'Total_Famílias': 'Famílias Afetadas',
-        'Número_Conflitos': 'Conflitos Registrados'
+        'Número_Conflitos': 'Conflitos Registrados',
+        'Ocupações Retomadas': 'Ocupações Retomadas'
     })
+
+    display_cols = ['Município', 'Famílias Afetadas', 'Conflitos Registrados', 'Ocupações Retomadas']
+    for col in display_cols:
+        if col not in df_display.columns:
+            df_display[col] = 0
+
     linha_total = pd.DataFrame({
         'Município': ['TOTAL'],
         'Famílias Afetadas': [df_display['Famílias Afetadas'].sum()],
-        'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()]
+        'Conflitos Registrados': [df_display['Conflitos Registrados'].sum()],
+        'Ocupações Retomadas': [df_display['Ocupações Retomadas'].sum()]
     })
     df_display_com_total = pd.concat([df_display, linha_total], ignore_index=True)
 
@@ -1746,28 +1798,31 @@ with tabs[1]:
             return 'background-color: #ffebee; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #ffebee'
         elif col == 'Conflitos Registrados':
             return 'background-color: #fff3e0; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #fff3e0'
+        elif col == 'Ocupações Retomadas':
+             return 'background-color: #e3f2fd; font-weight: bold' if val == df_display_com_total[col].iloc[-1] else 'background-color: #e3f2fd'
         return ''
-    
+
     styled_df = df_display_com_total.style.apply(
-        lambda x: [aplicar_cor_social(val, col) for val, col in zip(x, df_display_com_total.columns)], 
+        lambda x: [aplicar_cor_social(val, col) for val, col in zip(x, df_display_com_total.columns)],
         axis=1
     ).format({
         'Famílias Afetadas': '{:,.0f}',
-        'Conflitos Registrados': '{:,.0f}'
+        'Conflitos Registrados': '{:,.0f}',
+        'Ocupações Retomadas': '{:,.0f}'
     })
 
     col_fam, col_conf = st.columns(2, gap="large")
     with col_fam:
         st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
             <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Famílias Afetadas</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos agrários por município.</p>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Distribuição do número de famílias afetadas por conflitos por município.</p>
         </div>""", unsafe_allow_html=True)
         st.plotly_chart(fig_familias(df_confmun_raw), use_container_width=True, height=400, key="familias")
         st.caption("Figura 3.1: Distribuição de famílias afetadas por município.")
         with st.expander("Detalhes e Fonte da Figura 3.1"):
             st.write("""
             **Interpretação:**
-            O gráfico apresenta o número total de famílias afetadas por conflitos agrários em cada município.
+            O gráfico apresenta o número total de famílias afetadas por conflitos em cada município.
 
             **Observações:**
             - Dados agregados por município
@@ -1779,14 +1834,14 @@ with tabs[1]:
     with col_conf:
         st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 0.5rem;">
             <h3 style="color: #1E1E1E; margin-top: 0; margin-bottom: 0.5rem;">Conflitos Registrados</h3>
-            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos agrários registrados por município.</p>
+            <p style="color: #666; font-size: 0.95em; margin-bottom:0;">Número total de conflitos registrados por município.</p>
         </div>""", unsafe_allow_html=True)
         st.plotly_chart(fig_conflitos(df_confmun_raw), use_container_width=True, height=400, key="conflitos")
         st.caption("Figura 3.2: Distribuição de conflitos registrados por município.")
         with st.expander("Detalhes e Fonte da Figura 3.2"):
             st.write("""
             **Interpretação:**
-            O gráfico mostra o número total de conflitos agrários registrados em cada município.
+            O gráfico mostra o número total de conflitos registrados em cada município.
 
             **Observações:**
             - Contagem total de ocorrências por município
@@ -1795,7 +1850,6 @@ with tabs[1]:
 
             **Fonte:** CPT - Comissão Pastoral da Terra. *Conflitos no Campo Brasil*. Goiânia: CPT Nacional, 2025. Disponível em: https://www.cptnacional.org.br/. Acesso em: maio de 2025.
             """)
-
 
     st.markdown("---")
     st.markdown("""<div style="background-color: #fff; border-radius: 6px; padding: 1.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin: 1rem 0 0.5rem 0;">
@@ -1810,7 +1864,8 @@ with tabs[1]:
         A tabela apresenta os dados consolidados por município, incluindo:
         - Número de famílias afetadas por conflitos
         - Quantidade de conflitos registrados
-        
+        - Quantidade de ocupações retomadas
+
         **Observações:**
         - Valores absolutos por município
         - Totais na última linha
