@@ -1537,7 +1537,7 @@ centro = {
     "lon": (limites[0] + limites[2]) / 2
 }
 
-df_csv_raw     = load_csv(
+df_csv_raw= load_csv(
     r"CPT-PA-count.csv",
     columns=df_csv_cols
 )
