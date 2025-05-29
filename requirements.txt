@@ -1,7 +1,7 @@
-streamlit
 geopandas
-pandas
-plotly
 numpy
 duckdb
-psycopg2
+streamlit>=1.28.0
+pandas>=2.0.0
+psycopg2-binary>=2.9.0
+plotly>=5.15.0
