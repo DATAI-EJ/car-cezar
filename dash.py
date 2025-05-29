@@ -1004,6 +1004,11 @@ def fig_justica(df_proc_filtered: pd.DataFrame) -> dict[str, go.Figure]:
 
     return figs 
 
+def corrige_coord(x):
+    if pd.isna(x):
+        return np.nan
+    return x / 1e5 if abs(x) > 180 else x
+
 def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str) -> dict[str, go.Figure]:
     df = data_frame_entrada.copy()
     def create_placeholder_fig(title_message: str) -> go.Figure:
@@ -1488,226 +1493,6 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
     fig = _apply_layout(fig, title="Distribuição Espacial de Alertas (Desmatamento)", title_size=16)
 
     return fig
-
-import psycopg2
-from psycopg2 import Error
-
-DB_HOST = 'dataiesb.iesbtech.com.br'
-DB_NAME = '2312120036_Joel'
-DB_USER = '2312120036_Joel'
-DB_PASSWORD = '2312120036_Joel'
-DB_PORT = '5432'
-SCHEMA = 'CPT'
-TABLE = 'queimadas'
-
-def conectar_bd():
-    """Tenta estabelecer uma conexão com o banco de dados usando psycopg2."""
-    conn = None
-    try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            port=DB_PORT
-        )
-        return conn
-    except Error as e:
-        st.error(f"Erro ao conectar ao banco de dados: {e}")
-        return None
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado na conexão: {e}")
-        return None
-
-@st.cache_data(show_spinner=False)
-def load_inpe_db(year: int | None = None) -> pd.DataFrame | None:
-    conn = None
-    try:
-        conn = conectar_bd()
-        if conn is None:
-            return None
-
-        filtros = [
-            "riscofogo BETWEEN 0 AND 1",
-            "precipitacao >= 0",
-            "diasemchuva >= 0",
-            "latitude BETWEEN -15 AND 5",
-            "longitude BETWEEN -60 AND -45"
-        ]
-        if year is not None:
-            filtros.append(f"EXTRACT(YEAR FROM datahora) = {year}")
-        where_clause = " AND ".join(filtros)
-        query = f"""
-            SELECT
-                datahora,
-                riscofogo,
-                precipitacao,
-                mun_corrigido,
-                diasemchuva,
-                latitude,
-                longitude
-            FROM "{SCHEMA}"."{TABLE}" -- Use aspas duplas ao redor de SCHEMA e TABLE
-            WHERE {where_clause}
-        """
-        df = pd.read_sql(query, conn, parse_dates=['datahora'])
-
-        df.rename(columns={
-            'datahora':'DataHora',
-            'riscofogo':'RiscoFogo',
-            'precipitacao':'Precipitacao',
-            'mun_corrigido':'mun_corrigido',
-            'diasemchuva':'DiaSemChuva',
-            'latitude':'Latitude',
-            'longitude':'Longitude'
-        }, inplace=True)
-
-        for col in df.select_dtypes(include=['float64']).columns:
-            df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
-        for col in df.select_dtypes(include=['int64']).columns:
-            df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-        for col in df.select_dtypes(include=['object']).columns:
-            if df[col].nunique() / len(df) < 0.5:
-                df[col] = df[col].astype('category')
-        df = df.dropna(subset=['DataHora', 'mun_corrigido'])
-        return df
-
-    except Error as e:
-        st.error(f"Erro ao executar query ou processar dados do INPE: {e}")
-        return None
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao carregar dados do INPE: {e}")
-        return None
-    finally:
-        if conn:
-            conn.close()
-
-@st.cache_data(show_spinner=False)
-def get_available_inpe_years() -> list[int]:
-    years_df = pd.DataFrame()
-    conn = None
-    try:
-        conn = conectar_bd()
-        if conn is None:
-            return []
-
-        years_df = pd.read_sql(
-            f"SELECT DISTINCT EXTRACT(YEAR FROM datahora) AS year"
-            f" FROM \"{SCHEMA}\".\"{TABLE}\""
-            f" WHERE datahora IS NOT NULL"
-            f" ORDER BY year",
-            conn
-        )
-        return years_df['year'].dropna().astype(int).tolist()
-    except Error as e:
-        st.error(f"Erro ao buscar anos disponíveis do INPE: {e}")
-        return []
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao buscar anos disponíveis do INPE: {e}")
-        return []
-    finally:
-        if conn:
-            conn.close()
-
-def prepare_ranking_data(df, theme, period):
-    if df is None or df.empty:
-        return pd.DataFrame(), ''
-    
-    try:
-        df_clean = df.dropna(subset=['mun_corrigido']).copy()
-        
-        if theme == "Maior Risco de Fogo":
-            df_agg = df_clean.groupby('mun_corrigido').agg({
-                'RiscoFogo': ['mean', 'max', 'count'],
-                'DataHora': ['min', 'max']
-            }).round(4)
-            
-            df_agg.columns = ['Risco_Medio', 'Risco_Maximo', 'Total_Registros', 'Data_Inicial', 'Data_Final']
-            df_agg = df_agg.reset_index()
-            
-            df_rank = df_agg.sort_values('Risco_Medio', ascending=False).head(20)
-            
-            df_rank = df_rank.rename(columns={
-                'mun_corrigido': 'Município',
-                'Risco_Medio': 'Risco Médio',
-                'Risco_Maximo': 'Risco Máximo',
-                'Total_Registros': 'Nº Registros',
-                'Data_Inicial': 'Primeira Ocorrência',
-                'Data_Final': 'Última Ocorrência'
-            })
-            
-            df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-            df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-            
-            col_ord = 'Risco Médio'
-            
-        elif theme == "Maior Precipitação (evento)":
-            df_agg = df_clean.groupby('mun_corrigido').agg({
-                'Precipitacao': ['max', 'mean', 'sum', 'count'],
-                'DataHora': ['min', 'max']
-            }).round(2)
-            
-            df_agg.columns = ['Precip_Maxima', 'Precip_Media', 'Precip_Total', 'Total_Registros', 'Data_Inicial', 'Data_Final']
-            df_agg = df_agg.reset_index()
-            
-            df_rank = df_agg.sort_values('Precip_Maxima', ascending=False).head(20)
-            
-            df_rank = df_rank.rename(columns={
-                'mun_corrigido': 'Município',
-                'Precip_Maxima': 'Precipitação Máxima (mm)',
-                'Precip_Media': 'Precipitação Média (mm)',
-                'Precip_Total': 'Precipitação Total (mm)',
-                'Total_Registros': 'Nº Registros',
-                'Data_Inicial': 'Primeira Ocorrência',
-                'Data_Final': 'Última Ocorrência'
-            })
-            
-            df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-            df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-            
-            col_ord = 'Precipitação Máxima (mm)'
-            
-        elif theme == "Máx. Dias Sem Chuva":
-            df_agg = df_clean.groupby('mun_corrigido').agg({
-                'DiaSemChuva': ['max', 'mean', 'count'],
-                'DataHora': ['min', 'max']
-            }).round(1)
-            
-            df_agg.columns = ['Dias_Max_Sem_Chuva', 'Dias_Medio_Sem_Chuva', 'Total_Registros', 'Data_Inicial', 'Data_Final']
-            df_agg = df_agg.reset_index()
-            
-            df_rank = df_agg.sort_values('Dias_Max_Sem_Chuva', ascending=False).head(20)
-            
-            df_rank = df_rank.rename(columns={
-                'mun_corrigido': 'Município',
-                'Dias_Max_Sem_Chuva': 'Máx. Dias Sem Chuva',
-                'Dias_Medio_Sem_Chuva': 'Média Dias Sem Chuva',
-                'Total_Registros': 'Nº Registros',
-                'Data_Inicial': 'Primeira Ocorrência',
-                'Data_Final': 'Última Ocorrência'
-            })
-            
-            df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-            df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-            
-            col_ord = 'Máx. Dias Sem Chuva'
-        
-        else:
-            return pd.DataFrame(), ''
-        
-        df_rank.insert(0, 'Posição', range(1, len(df_rank) + 1))
-        
-        return df_rank, col_ord
-        
-    except Exception as e:
-        st.error(f"Erro ao preparar dados do ranking: {e}")
-        return pd.DataFrame(), ''
-
-YEAR_OPTIONS = ["Todos os Anos"] + get_available_inpe_years()
-DF_BASE_ALL_YEARS = load_inpe_db(year=None)
-
-if DF_BASE_ALL_YEARS is None:
-    st.error("Não foi possível carregar os dados base para todos os anos. O aplicativo não pode prosseguir. Verifique a conexão com o banco de dados e a existência/permissões da tabela `CPT.queimadas`.")
-    st.stop()
 
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
 gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef', 'ha_total'] 
@@ -2386,74 +2171,439 @@ with tabs[3]:
     st.header("Focos de Calor")
 
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
-        st.write(
-            "Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:"
-        )
-        st.write("- Risco de fogo")
-        st.write("- Precipitação acumulada")
-        st.write("- Distribuição espacial")
+        st.write("""
+        Esta análise apresenta dados sobre focos de calor detectados por satélite, incluindo:
+        - Risco de fogo
+        - Precipitação acumulada
+        - Distribuição espacial
+
+        Os dados são provenientes do Programa Queimadas do INPE.
+        """)
         st.markdown(
-            "**Fonte Geral da Seção:** INPE – Programa Queimadas, 2025.",
+            "**Fonte Geral da Seção:** INPE – Instituto Nacional de Pesquisas Espaciais. Programa Queimadas: Monitoramento dos Focos Ativos por Estados. São José dos Campos: INPE, 2025.",
             unsafe_allow_html=True
         )
 
-    ano_sel_graf = st.selectbox(
-        'Período para gráficos:',
-        YEAR_OPTIONS,
+    files = [
+        r"focos_municipios_filtrados_part1.csv",
+        r"focos_municipios_filtrados_part2.csv",
+        r"focos_municipios_filtrados_part3.csv",
+        r"focos_municipios_filtrados_part4.csv",
+        r"focos_municipios_filtrados_part5.csv",
+        r"focos_municipios_filtrados_part6.csv",
+        r"focos_municipios_filtrados_2024_parte_1.csv",
+        r"focos_municipios_filtrados_2024_parte_2.csv",
+        r"focos_municipios_filtrados_2024_parte_3.csv",
+        r"focos_municipios_filtrados_2024_parte_4.csv"
+    ]
+
+    @st.cache_data(show_spinner=False)
+    def load_inpe_duckdb(filepaths, year=None):
+        conn = duckdb.connect(database=':memory:')
+        queries = []
+        for path in filepaths:
+            queries.append(f"""
+                SELECT
+                    try_cast(DataHora as TIMESTAMP) AS DataHora,
+                    try_cast(RiscoFogo AS DOUBLE) AS RiscoFogo,
+                    try_cast(Precipitacao AS DOUBLE) AS Precipitacao,
+                    try_cast(mun_corrigido AS VARCHAR) AS mun_corrigido,
+                    try_cast(DiaSemChuva AS INT) AS DiaSemChuva,
+                    try_cast(Latitude AS DOUBLE) AS Latitude,
+                    try_cast(Longitude AS DOUBLE) AS Longitude
+                FROM read_csv_auto('{path}')
+                WHERE
+                    RiscoFogo BETWEEN 0 AND 1 AND
+                    Precipitacao >= 0 AND
+                    DiaSemChuva >= 0 AND
+                    Latitude BETWEEN -15 AND 5 AND
+                    Longitude BETWEEN -60 AND -45
+                    {'AND extract(year from try_cast(DataHora as TIMESTAMP)) = ' + str(year) if year is not None and isinstance(year, int) else ''}
+            """)
+        full_query = " UNION ALL ".join(queries)
+        df = conn.execute(full_query).fetchdf()
+    
+        for col in df.columns:
+            if df[col].dtype == 'float64':
+                df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
+            elif df[col].dtype == 'int64':
+                df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
+            elif df[col].dtype == 'object':
+                 if len(df[col].unique()) / len(df) < 0.5:
+                     try:
+                        df[col] = df[col].astype('category')
+                     except Exception:
+                        pass
+
+        df = df.dropna(subset=['DataHora'])
+        if 'mun_corrigido' in df.columns:
+            df = df.dropna(subset=['mun_corrigido'])
+        return df
+
+    @st.cache_data(show_spinner=False)
+    def get_available_inpe_years(filepaths):
+        conn = duckdb.connect(database=':memory:')
+        queries = []
+        for path in filepaths:
+            queries.append(f"""
+                SELECT DISTINCT extract(year from try_cast(DataHora as TIMESTAMP)) as year
+                FROM read_csv_auto('{path}')
+                WHERE try_cast(DataHora as TIMESTAMP) IS NOT NULL
+            """)
+        full_query = " UNION ALL ".join(queries)
+        years_df = conn.execute(full_query).fetchdf()
+        return sorted(years_df['year'].dropna().astype(int).unique())
+
+    anos_disponiveis_lista = get_available_inpe_years(files)
+    opcoes_ano_graficos = ["Todos os Anos"] + anos_disponiveis_lista
+
+    ano_selecionado_graficos_str = st.selectbox(
+        'Selecione o período para análise geral da aba (gráficos):',
+        opcoes_ano_graficos,
         index=0,
-        key="ano_focos_calor_global_tab3"
+        key="ano_focos_calor_global_tab3_com_todos"
     )
-    ano_param = None if ano_sel_graf == "Todos os Anos" else int(ano_sel_graf)
-    display_graf = ("todo o período histórico" if ano_param is None else f"o ano de {ano_param}")
-    df_graf = load_inpe_db(year=ano_param)
 
-    if df_graf is not None and not df_graf.empty:
-        figs = graficos_inpe(df_graf, ano_sel_graf)
+    ano_param_load_graficos = None
+    display_periodo_graficos = "todo o período histórico"
+    if ano_selecionado_graficos_str != "Todos os Anos":
+        ano_param_load_graficos = int(ano_selecionado_graficos_str)
+        display_periodo_graficos = f"o ano de {ano_param_load_graficos}"
+
+    df_inpe_global_tab = load_inpe_duckdb(files, year=ano_param_load_graficos)
+
+    if not df_inpe_global_tab.empty:
+        figs_tab3 = graficos_inpe(df_inpe_global_tab, ano_selecionado_graficos_str)
+
         st.subheader("Evolução Temporal do Risco de Fogo")
-        st.plotly_chart(figs['temporal'], use_container_width=True)
-        st.caption(f"Figura: Evolução mensal do risco médio de fogo para {display_graf}.")
+        st.plotly_chart(figs_tab3['temporal'], use_container_width=True)
+        st.caption(f"Figura: Evolução mensal do risco médio de fogo para {display_periodo_graficos}.")
+        with st.expander("Detalhes e Fonte da Figura"):
+            st.write(f"""
+            **Interpretação:**
+            O gráfico mostra como o risco médio de fogo varia mês a mês para {display_periodo_graficos}, numa escala de 0 (mínimo) a 1 (máximo).
+            Se "Todos os Anos" estiver selecionado, a interpretação pode variar dependendo da agregação feita no gráfico.
+            **Observação para {ano_selecionado_graficos_str if isinstance(ano_selecionado_graficos_str, int) else "anos específicos"}:**
+            { {
+                2020: "Pico em agosto (0.94).",
+                2021: "Pico em julho (0.87).",
+                2022: "Pico em julho (0.83).",
+                2023: "Pico em agosto (0.69).",
+                2024: "Pico em setembro (0.96)."
+            }.get(ano_param_load_graficos, "Observações anuais específicas são mostradas ao selecionar um único ano.") }
+            **Fonte:** INPE. *Programa Queimadas: Dados de Focos de Calor*. São José dos Campos: INPE, 2025.
+            """)
 
-        col1, col2 = st.columns(2, gap="large")
-        with col1:
+        col1_graf_tab3, col2_graf_tab3 = st.columns(2, gap="large")
+        with col1_graf_tab3:
             st.subheader("Top Municípios por Risco Médio de Fogo")
-            st.plotly_chart(figs['top_risco'], use_container_width=True)
+            st.plotly_chart(figs_tab3['top_risco'], use_container_width=True)
+            st.caption(f"Figura: Municípios com maior risco médio de fogo para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
+                st.write(f"""
+                **Interpretação:**
+                Ranking dos municípios com maior risco médio de fogo para {display_periodo_graficos}.
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
+                """)
+
             st.subheader("Top Municípios por Precipitação Acumulada")
-            st.plotly_chart(figs['top_precip'], use_container_width=True)
-        with col2:
+            st.plotly_chart(figs_tab3['top_precip'], use_container_width=True)
+            st.caption(f"Figura: Municípios com maior precipitação acumulada para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
+                st.write(f"""
+                **Interpretação:**
+                Ranking dos municípios com maior volume de chuva (mm) para {display_periodo_graficos}.
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
+                """)
+        with col2_graf_tab3:
             st.subheader("Mapa de Distribuição dos Focos de Calor")
-            st.plotly_chart(figs['mapa'], use_container_width=True, config={'scrollZoom': True})
+            st.plotly_chart(figs_tab3['mapa'], use_container_width=True, config={'scrollZoom': True})
+            st.caption(f"Figura: Distribuição espacial dos focos de calor para {display_periodo_graficos}.")
+            with st.expander("Detalhes e Fonte da Figura"):
+                st.write(f"""
+                **Interpretação:**
+                Cada ponto representa um foco de calor detectado por satélite para {display_periodo_graficos}.
+                Alta densidade indica maior atividade de queimadas.
+                {("(Dados parciais para o ano corrente disponíveis até " + pd.Timestamp.now().strftime('%B/%Y') + ")") if ano_param_load_graficos == pd.Timestamp.now().year else ""}
+                **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
+                """)
     else:
-        st.warning(f"Nenhum dado para {ano_sel_graf}.")
+        st.warning(f"Nenhum dado de foco de calor encontrado para a análise geral do período selecionado ({ano_selecionado_graficos_str}).")
 
     st.divider()
     st.header("Ranking de Municípios por Indicadores de Queimadas")
-    st.caption("Classifica municípios pelo maior registro de cada indicador.")
-    colA, colB = st.columns(2)
-    with colA:
-        ano_sel_rank = st.selectbox(
-            'Período para ranking:', YEAR_OPTIONS,
-            index=0, key="ano_ranking_tab3"
-        )
-    with colB:
-        tema_rank = st.selectbox(
-            'Indicador para ranking:',
-            ["Maior Risco de Fogo", "Maior Precipitação (evento)", "Máx. Dias Sem Chuva"],
-            key="tema_ranking"
-        )
-    ano_rank_param = None if ano_sel_rank == "Todos os Anos" else int(ano_sel_rank)
-    df_rank_base = DF_BASE_ALL_YEARS if ano_rank_param is None else load_inpe_db(year=ano_rank_param)
-    periodo_rank = ("Todo o Período Histórico" if ano_rank_param is None else f"Ano de {ano_rank_param}")
+    st.caption("Esta seção analisa os dados para classificar os municípios, considerando o maior valor do indicador para cada um deles.")
 
-    st.subheader(f"Ranking por {tema_rank} ({periodo_rank})")
-    if df_rank_base is not None and not df_rank_base.empty:
-        df_rank, col_ord = prepare_ranking_data(df_rank_base, tema_rank, periodo_rank)
-        if df_rank is not None and not df_rank.empty:
-            st.dataframe(df_rank, use_container_width=True, hide_index=True)
+    df_ranking_raw_all_years = load_inpe_duckdb(files, year=None)
+
+    if not df_ranking_raw_all_years.empty:
+        anos_disponiveis_ranking = get_available_inpe_years(files)
+        opcoes_ano_ranking = ["Todos os Anos"] + anos_disponiveis_ranking
+
+        col_filtro1, col_filtro2 = st.columns([1, 1])
+
+        with col_filtro1:
+            ano_selecionado_ranking = st.selectbox(
+                'Selecione o período para o ranking:',
+                opcoes_ano_ranking,
+                index=0,
+                key="ano_ranking_focos_calor"
+            )
+
+        with col_filtro2:
+            tema_ranking_all = st.selectbox(
+                "Selecione o indicador para o ranking:",
+                options=["Maior Risco de Fogo", "Maior Precipitação (evento)", "Máx. Dias Sem Chuva"],
+                key="selectbox_tema_ranking_melhorado"
+            )
+
+        if ano_selecionado_ranking == "Todos os Anos":
+            df_ranking_base_all = df_ranking_raw_all_years.copy()
+            periodo_display = "Todo o Período Histórico"
         else:
-            st.info("Sem dados válidos para este ranking.")
-    else:
-        st.warning("Nenhum dado para o período selecionado.")
+            ano_int = int(ano_selecionado_ranking)
+            df_ranking_base_all = load_inpe_duckdb(files, year=ano_int)
+            periodo_display = f"Ano de {ano_int}"
 
+        st.subheader(f"Ranking de Municípios por {tema_ranking_all} ({periodo_display})")
+
+        if not df_ranking_base_all.empty:
+            df_ranking_final_all = pd.DataFrame()
+            col_valor_tema_original_all = ""
+            col_valor_tema_renomeada_all = ""
+            col_data_tema_renomeada_all = "Data do Evento"
+
+            required_cols_all = ['mun_corrigido', 'DataHora']
+            if tema_ranking_all == "Maior Risco de Fogo":
+                required_cols_all.extend(['RiscoFogo', 'Precipitacao', 'DiaSemChuva'])
+                col_valor_tema_original_all = 'RiscoFogo'
+                col_valor_tema_renomeada_all = 'Risco de Fogo'
+            elif tema_ranking_all == "Maior Precipitação (evento)":
+                required_cols_all.extend(['Precipitacao', 'RiscoFogo', 'DiaSemChuva'])
+                col_valor_tema_original_all = 'Precipitacao'
+                col_valor_tema_renomeada_all = 'Precipitação (mm)'
+            elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                required_cols_all.extend(['DiaSemChuva', 'RiscoFogo', 'Precipitacao'])
+                col_valor_tema_original_all = 'DiaSemChuva'
+                col_valor_tema_renomeada_all = 'Dias Sem Chuva'
+
+            if all(col in df_ranking_base_all.columns for col in required_cols_all):
+                df_temp_ranking_all = df_ranking_base_all.dropna(subset=['mun_corrigido', col_valor_tema_original_all])
+
+                if not df_temp_ranking_all.empty:
+                    idx_all = df_temp_ranking_all.loc[df_temp_ranking_all.groupby('mun_corrigido', observed=False, dropna=False)[col_valor_tema_original_all].idxmax()]
+
+                    cols_para_selecionar_de_idx = ['mun_corrigido', 'DataHora', 'RiscoFogo', 'Precipitacao', 'DiaSemChuva']
+                    df_ranking_final_all = idx_all[cols_para_selecionar_de_idx].copy()
+
+                    df_ranking_final_all['DataHora'] = pd.to_datetime(df_ranking_final_all['DataHora'], errors='coerce')
+                    df_ranking_final_all = df_ranking_final_all.dropna(subset=['DataHora']) 
+
+                    if not df_ranking_final_all.empty:
+                        df_ranking_final_all['Ano'] = df_ranking_final_all['DataHora'].dt.year
+                        df_ranking_final_all['Mês'] = df_ranking_final_all['DataHora'].dt.strftime('%B')
+
+                        freq_municipios = df_temp_ranking_all['mun_corrigido'].value_counts()
+                        df_ranking_final_all['Total_Registros'] = df_ranking_final_all['mun_corrigido'].astype(object).map(freq_municipios).fillna(0).astype(int)
+
+                        rename_dict = {
+                            'mun_corrigido': 'Município',
+                            'DataHora': col_data_tema_renomeada_all,
+                            'Total_Registros': 'Total de Registros'
+                        }
+
+                        ordenacao_col = ""
+                        if tema_ranking_all == "Maior Risco de Fogo":
+                            rename_dict.update({
+                                'RiscoFogo': col_valor_tema_renomeada_all,
+                                'Precipitacao': 'Precipitação (mm)',
+                                'DiaSemChuva': 'Dias Sem Chuva'
+                            })
+                            ordenacao_col = col_valor_tema_renomeada_all
+                        elif tema_ranking_all == "Maior Precipitação (evento)":
+                            rename_dict.update({
+                                'Precipitação': col_valor_tema_renomeada_all,
+                                'Precipitacao': col_valor_tema_renomeada_all, 
+                                'RiscoFogo': 'Risco de Fogo',
+                                'DiaSemChuva': 'Dias Sem Chuva'
+                            })
+                            ordenacao_col = col_valor_tema_renomeada_all
+                        elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                            rename_dict.update({
+                                'DiaSemChuva': col_valor_tema_renomeada_all,
+                                'RiscoFogo': 'Risco de Fogo',
+                                'Precipitacao': 'Precipitação (mm)'
+                            })
+                            ordenacao_col = col_valor_tema_renomeada_all
+
+                        df_ranking_final_all.rename(columns=rename_dict, inplace=True)
+
+                        if ordenacao_col in df_ranking_final_all.columns:
+                            df_ranking_final_all = df_ranking_final_all.sort_values(
+                                by=[ordenacao_col, 'Total de Registros'],
+                                ascending=[False, False]
+                            ).reset_index(drop=True)
+                        else:
+                             st.warning(f"Coluna de ordenação '{ordenacao_col}' não encontrada após renomear colunas.")
+                             if 'Total de Registros' in df_ranking_final_all.columns:
+                                 df_ranking_final_all = df_ranking_final_all.sort_values(
+                                    by=['Total de Registros'],
+                                    ascending=[False]
+                                ).reset_index(drop=True)
+                             else:
+                                 df_ranking_final_all = df_ranking_final_all.reset_index(drop=True) 
+
+
+                        df_ranking_final_all['Posição'] = range(1, len(df_ranking_final_all) + 1)
+
+                        cols_order = ['Posição', 'Município', ordenacao_col, col_data_tema_renomeada_all, 'Ano', 'Mês']
+
+                        if tema_ranking_all == "Maior Risco de Fogo":
+                            cols_order.extend(['Precipitação (mm)', 'Dias Sem Chuva'])
+                        elif tema_ranking_all == "Maior Precipitação (evento)":
+                            cols_order.extend(['Risco de Fogo', 'Dias Sem Chuva'])
+                        elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                            cols_order.extend(['Risco de Fogo', 'Precipitação (mm)'])
+
+                        cols_order.append('Total de Registros')
+                        cols_order = [col for col in cols_order if col in df_ranking_final_all.columns]
+                        df_ranking_final_all = df_ranking_final_all[cols_order]
+
+                        column_config_ranking_all = {
+                            "Posição": st.column_config.NumberColumn("Pos.", width="small"),
+                            "Município": st.column_config.TextColumn("Município", width="medium"),
+                            col_data_tema_renomeada_all: st.column_config.DatetimeColumn(
+                                "Data do Evento",
+                                format="DD/MM/YYYY HH:mm",
+                                width="medium"
+                            ),
+                            "Ano": st.column_config.NumberColumn("Ano", format="%d", width="small"),
+                            "Mês": st.column_config.TextColumn("Mês", width="small"),
+                            "Total de Registros": st.column_config.NumberColumn("Total Registros", format="%d", width="small")
+                        }
+
+                        if ordenacao_col and ordenacao_col in df_ranking_final_all.columns:
+                            if tema_ranking_all == "Maior Risco de Fogo":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Risco de Fogo", format="%.3f", width="small"
+                                )
+                                if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                        "Precip. (mm)", format="%.1f", width="small"
+                                    )
+                                if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                        "Dias S/Chuva", format="%d", width="small"
+                                    )
+                            elif tema_ranking_all == "Maior Precipitação (evento)":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Precipitação (mm)", format="%.1f", width="small"
+                                )
+                                if "Risco de Fogo" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                        "Risco Fogo", format="%.3f", width="small"
+                                    )
+                                if "Dias Sem Chuva" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Dias Sem Chuva"] = st.column_config.NumberColumn(
+                                        "Dias S/Chuva", format="%d", width="small"
+                                    )
+                            elif tema_ranking_all == "Máx. Dias Sem Chuva":
+                                column_config_ranking_all[ordenacao_col] = st.column_config.NumberColumn(
+                                    "Dias Sem Chuva", format="%d", width="small"
+                                )
+                                if "Risco de Fogo" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Risco de Fogo"] = st.column_config.NumberColumn(
+                                        "Risco Fogo", format="%.3f", width="small"
+                                    )
+                                if "Precipitação (mm)" in df_ranking_final_all.columns:
+                                    column_config_ranking_all["Precipitação (mm)"] = st.column_config.NumberColumn(
+                                        "Precip. (mm)", format="%.1f", width="small"
+                                    )
+
+                        col_met1, col_met2, col_met3, col_met4 = st.columns(4)
+
+                        with col_met1:
+                            total_municipios = len(df_ranking_final_all)
+                            st.metric("Total de Municípios", f"{total_municipios:,}")
+
+                        with col_met2:
+                            if ordenacao_col and ordenacao_col in df_ranking_final_all.columns and not df_ranking_final_all.empty:
+                                valor_max = df_ranking_final_all[ordenacao_col].max()
+                                if tema_ranking_all == "Maior Risco de Fogo":
+                                    st.metric("Maior Risco", f"{valor_max:.3f}")
+                                elif tema_ranking_all == "Maior Precipitação (evento)":
+                                    st.metric("Maior Precipitação", f"{valor_max:.1f} mm")
+                                else:
+                                    st.metric("Máx. Dias S/Chuva", f"{int(valor_max)} dias")
+                            else:
+                                st.metric("Indicador Principal", "N/A")
+
+                        with col_met3:
+                            if not df_ranking_final_all.empty and 'Município' in df_ranking_final_all.columns:
+                                municipio_lider = df_ranking_final_all.iloc[0]['Município']
+                                st.metric("Município Líder", municipio_lider)
+                            else:
+                                st.metric("Município Líder", "N/A")
+
+                        with col_met4:
+                            if ano_selecionado_ranking != "Todos os Anos":
+                                if 'Ano' in df_ranking_final_all.columns and not df_ranking_final_all['Ano'].empty:
+                                    ano_mais_comum_series = df_ranking_final_all['Ano'].mode()
+                                    if not ano_mais_comum_series.empty:
+                                        ano_mais_comum = ano_mais_comum_series.iloc[0]
+                                        st.metric("Ano Predominante", f"{int(ano_mais_comum)}")
+                                    else:
+                                        st.metric("Ano Predominante", "N/A")
+                                else:
+                                    st.metric("Ano Predominante", "N/A")
+                            else:
+                                if 'Total de Registros' in df_ranking_final_all.columns:
+                                    total_registros = df_ranking_final_all['Total de Registros'].sum()
+                                    st.metric("Total de Registros", f"{total_registros:,}")
+                                else:
+                                    st.metric("Total de Registros", "N/A")
+
+
+                        st.dataframe(
+                            df_ranking_final_all,
+                            use_container_width=True,
+                            column_config=column_config_ranking_all,
+                            hide_index=True,
+                            height=400
+                        )
+
+                        with st.expander("ℹ️ Informações sobre o Ranking"):
+                            st.write(f"""
+                            **Como interpretar este ranking:**
+
+                            - **Critério de Classificação:** {tema_ranking_all} registrado para cada município
+                            - **Período Analisado:** {periodo_display}
+                            - **Metodologia:** Para cada município, foi selecionado o registro com o maior valor do indicador escolhido
+                            - **Desempate:** Em caso de valores iguais, municípios com mais registros totais ficam em posição superior
+                            - **Informações Contextuais:** Data do evento, ano, mês e outros indicadores do mesmo registro
+
+                            **Colunas da Tabela:**
+                            - **Posição:** Classificação no ranking
+                            - **Município:** Nome do município
+                            - **{ordenacao_col if ordenacao_col else "Indicador Principal"}:** Valor máximo do indicador selecionado
+                            - **Data do Evento:** Quando o valor máximo foi registrado
+                            - **Total de Registros:** Quantidade total de registros do município no período
+                            - **Informações Contextuais:** Outros indicadores do mesmo registro (risco, precipitação, dias sem chuva)
+
+                            **Fonte:** INPE. *Programa Queimadas*. INPE, 2025.
+                            """)
+
+                else:
+                     st.info(f"Não há dados válidos para gerar o ranking de '{tema_ranking_all}' no período selecionado.")
+            else:
+                 st.info(f"Não há dados válidos para gerar o ranking de '{tema_ranking_all}' no período selecionado.")
+        else: 
+            st.warning(f"Colunas necessárias não encontradas para gerar o ranking de '{tema_ranking_all}'. Verifique se {required_cols_all} estão presentes em df_ranking_base_all.")
+    else: 
+        st.warning("Nenhum dado de foco de calor encontrado para a seção de ranking.")
+        
 with tabs[4]:
     st.header("Desmatamento")
 
