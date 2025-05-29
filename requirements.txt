@@ -6,3 +6,5 @@ pandas>=2.0.0
 psycopg2-binary>=2.9.0
 plotly>=5.15.0
 openpyxl
+psycopg2-binary
+SQLAlchemy
