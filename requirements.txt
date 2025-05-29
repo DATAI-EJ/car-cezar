@@ -1,12 +1,7 @@
-geopandas
-plotly
-pandas
 streamlit
-shapely
-openpyxl
+geopandas
+pandas
+plotly
 numpy
 duckdb
-fiona
-pyproj
-rtree
 psycopg2
