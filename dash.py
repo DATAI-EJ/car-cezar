@@ -1,6 +1,7 @@
 import streamlit as st
 import geopandas as gpd
 import pandas as pd
+from typing import List, Optional, Tuple
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.io as pio
@@ -8,6 +9,8 @@ import unicodedata
 import os
 import numpy as np
 import duckdb
+import logging
+import psutil
 
 st.set_page_config(
     page_title="Dashboard de Conflitos Ambientais",
@@ -1460,58 +1463,102 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 import warnings
 
-DB_HOST = 'dataiesb.iesbtech.com.br'
-DB_NAME = '2312120036_Joel'
-DB_USER = '2312120036_Joel'
-DB_PASSWORD = '2312120036_Joel'
-DB_PORT = '5432'
-SCHEMA = 'CPT'
-TABLE = 'queimadas'
+warnings.filterwarnings('ignore')
+logging.getLogger().setLevel(logging.ERROR)
 
-CHUNK_SIZE = 10000
+DB_CONFIG = {
+    'host': 'dataiesb.iesbtech.com.br',
+    'database': '2312120036_Joel',
+    'user': '2312120036_Joel',
+    'password': '2312120036_Joel',
+    'port': '5432',
+    'schema': 'CPT',
+    'table': 'queimadas'
+}
 
-def create_engine_connection():
-    try:
-        connection_string = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-        engine = create_engine(connection_string, pool_pre_ping=True)
-        return engine
-    except SQLAlchemyError as e:
-        st.error(f"Erro ao criar engine de conexão: {e}")
-        return None
-    except Exception as e:
-        st.error(f"Erro inesperado na criação da engine: {e}")
-        return None
+CHUNK_SIZE = 15000 
+MEMORY_THRESHOLD = 85  
 
-@st.cache_data(show_spinner=False, max_entries=1, ttl=3600)
-def load_inpe_db(year: int | None = None) -> pd.DataFrame | None:
-    engine = None
-    try:
-        engine = create_engine_connection()
-        if engine is None:
-            return None
+class DatabaseManager:
+    def __init__(self):
+        self._engine = None
+        self._connection_string = self._build_connection_string()
+    
+    def _build_connection_string(self) -> str:
+        return (f"postgresql://{DB_CONFIG['user']}:{DB_CONFIG['password']}"
+                f"@{DB_CONFIG['host']}:{DB_CONFIG['port']}/{DB_CONFIG['database']}")
+    
+    def get_engine(self):
+        if self._engine is None:
+            try:
+                self._engine = create_engine(
+                    self._connection_string,
+                    pool_size=5,
+                    max_overflow=10,
+                    pool_pre_ping=True,
+                    pool_recycle=3600,
+                    echo=False
+                )
+            except Exception:
+                return None
+        return self._engine
+    
+    def dispose(self):
+        if self._engine:
+            self._engine.dispose()
+            self._engine = None
 
-        filtros = [
+class DataProcessor:
+    
+    def __init__(self):
+        self.db_manager = DatabaseManager()
+        self._base_filters = [
             "riscofogo BETWEEN 0 AND 1",
             "precipitacao >= 0",
             "diasemchuva >= 0",
             "latitude BETWEEN -15 AND 5",
             "longitude BETWEEN -60 AND -45"
         ]
-        if year is not None:
-            filtros.append(f"EXTRACT(YEAR FROM datahora) = {year}")
-        where_clause = " AND ".join(filtros)
+    
+    def _check_memory_usage(self) -> bool:
+        """Verifica uso de memória"""
+        return psutil.virtual_memory().percent < MEMORY_THRESHOLD
+    
+    def _optimize_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df
         
-        count_query = text(f"""
-            SELECT COUNT(*) 
-            FROM "{SCHEMA}"."{TABLE}"
-            WHERE {where_clause}
-        """)
+        float_cols = df.select_dtypes(include=['float64']).columns
+        for col in float_cols:
+            df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
         
-        with engine.connect() as conn:
-            result = conn.execute(count_query)
-            total_rows = result.scalar()
-
-        base_select = f"""
+        int_cols = df.select_dtypes(include=['int64']).columns
+        for col in int_cols:
+            df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
+        
+        obj_cols = df.select_dtypes(include=['object']).columns
+        for col in obj_cols:
+            if col != 'DataHora' and df[col].nunique() / len(df) < 0.4:
+                df[col] = df[col].astype('category')
+        
+        return df
+    
+    def _get_row_count(self, engine, where_clause: str) -> int:
+        try:
+            count_query = text(f"""
+                SELECT COUNT(*) 
+                FROM "{DB_CONFIG['schema']}"."{DB_CONFIG['table']}"
+                WHERE {where_clause}
+            """)
+            
+            with engine.connect() as conn:
+                result = conn.execute(count_query)
+                return result.scalar() or 0
+        except Exception:
+            return 0
+    
+    def _build_base_query(self) -> str:
+        return f"""
             SELECT
                 datahora,
                 riscofogo,
@@ -1520,282 +1567,376 @@ def load_inpe_db(year: int | None = None) -> pd.DataFrame | None:
                 diasemchuva,
                 latitude,
                 longitude
-            FROM "{SCHEMA}"."{TABLE}"
-            WHERE {where_clause}
+            FROM "{DB_CONFIG['schema']}"."{DB_CONFIG['table']}"
         """
-
-        if total_rows <= CHUNK_SIZE:
-            query = text(base_select)
-            df = pd.read_sql(query, engine, parse_dates=['datahora'])
-        else:
-            chunks = []
+    
+    def _load_data_chunks(self, engine, base_query: str, where_clause: str, 
+                         total_rows: int) -> Optional[pd.DataFrame]:
+        chunks = []
+        
+        try:
             for offset in range(0, total_rows, CHUNK_SIZE):
+                if not self._check_memory_usage():
+                    gc.collect()
+                    if not self._check_memory_usage():
+                        break
+                
                 chunk_query = text(f"""
-                    {base_select}
+                    {base_query}
+                    WHERE {where_clause}
                     LIMIT {CHUNK_SIZE} OFFSET {offset}
-                """)   
+                """)
+                
                 chunk_df = pd.read_sql(chunk_query, engine, parse_dates=['datahora'])
-                chunk_df = optimize_dataframe_memory(chunk_df)
+                chunk_df = self._optimize_dataframe(chunk_df)
                 chunks.append(chunk_df)
+                
                 del chunk_df
                 gc.collect()
-                
-            df = pd.concat(chunks, ignore_index=True)
-            del chunks
-            gc.collect()
-
-        df = df.rename(columns={
-            'datahora': 'DataHora',
-            'riscofogo': 'RiscoFogo',
-            'precipitacao': 'Precipitacao',
-            'mun_corrigido': 'mun_corrigido',
-            'diasemchuva': 'DiaSemChuva',
-            'latitude': 'Latitude',
-            'longitude': 'Longitude'
-        })
-        
-        df = optimize_dataframe_memory(df)
-        df = df.dropna(subset=['DataHora', 'mun_corrigido'])
-        
-        gc.collect()
-        return df
-
-    except SQLAlchemyError as e:
-        st.error(f"Erro ao executar query ou processar dados do INPE: {e}")
-        return None
-    except Exception as e:
-        st.error(f"Erro inesperado ao carregar dados do INPE: {e}")
-        return None
-    finally:
-        if engine:
-            engine.dispose()
-
-def optimize_dataframe_memory(df: pd.DataFrame) -> pd.DataFrame:
-    for col in df.select_dtypes(include=['float64']).columns:
-        df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
-    
-    for col in df.select_dtypes(include=['int64']).columns:
-        df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-    
-    for col in df.select_dtypes(include=['object']).columns:
-        if df[col].nunique() / len(df) < 0.5: 
-            df[col] = df[col].astype('category')
-    
-    return df
-
-@st.cache_data(show_spinner=False, max_entries=1, ttl=3600)
-def inpe_anos() -> list[int]:
-    """Get available years from the database."""
-    engine = None
-    try:
-        engine = create_engine_connection()
-        if engine is None:
-            return []
             
-        query = text(f"""
-            SELECT DISTINCT EXTRACT(YEAR FROM datahora) AS year
-            FROM "{SCHEMA}"."{TABLE}"
-            WHERE datahora IS NOT NULL
-            ORDER BY year
-        """)
+            if chunks:
+                df = pd.concat(chunks, ignore_index=True)
+                del chunks
+                gc.collect()
+                return df
+            
+        except Exception:
+            pass
         
-        with engine.connect() as conn:
-            result = conn.execute(query)
-            years = [int(row[0]) for row in result.fetchall() if row[0] is not None]
+        return None
+    
+    def load_inpe_data(self, year: Optional[int] = None) -> Optional[pd.DataFrame]:
+        engine = self.db_manager.get_engine()
+        if not engine:
+            return None
         
-        return years
+        try:
+            filters = self._base_filters.copy()
+            if year is not None:
+                filters.append(f"EXTRACT(YEAR FROM datahora) = {year}")
+            where_clause = " AND ".join(filters)
+            
+            total_rows = self._get_row_count(engine, where_clause)
+            if total_rows == 0:
+                return pd.DataFrame()
+            
+            base_query = self._build_base_query()
+            
+            if total_rows <= CHUNK_SIZE:
+                query = text(f"{base_query} WHERE {where_clause}")
+                df = pd.read_sql(query, engine, parse_dates=['datahora'])
+            else:
+                df = self._load_data_chunks(engine, base_query, where_clause, total_rows)
+            
+            if df is None or df.empty:
+                return pd.DataFrame()
+            
+            df = df.rename(columns={
+                'datahora': 'DataHora',
+                'riscofogo': 'RiscoFogo',
+                'precipitacao': 'Precipitacao',
+                'mun_corrigido': 'mun_corrigido',
+                'diasemchuva': 'DiaSemChuva',
+                'latitude': 'Latitude',
+                'longitude': 'Longitude'
+            })
+            
+            df = self._optimize_dataframe(df)
+            df = df.dropna(subset=['DataHora', 'mun_corrigido'])
+            
+            gc.collect()
+            return df
+            
+        except Exception:
+            return None
+        finally:
+            self.db_manager.dispose()
+    
+    def get_available_years(self) -> List[int]:
+        engine = self.db_manager.get_engine()
+        if not engine:
+            return []
         
-    except SQLAlchemyError as e:
-        st.error(f"Erro ao buscar anos disponíveis do INPE: {e}")
-        return []
-    except Exception as e:
-        st.error(f"Erro inesperado ao buscar anos disponíveis do INPE: {e}")
-        return []
-    finally:
-        if engine:
-            engine.dispose()
+        try:
+            query = text(f"""
+                SELECT DISTINCT EXTRACT(YEAR FROM datahora) AS year
+                FROM "{DB_CONFIG['schema']}"."{DB_CONFIG['table']}"
+                WHERE datahora IS NOT NULL
+                ORDER BY year
+            """)
+            
+            with engine.connect() as conn:
+                result = conn.execute(query)
+                years = [int(row[0]) for row in result.fetchall() if row[0] is not None]
+            
+            return years
+            
+        except Exception:
+            return []
+        finally:
+            self.db_manager.dispose()
 
-def preparar_rank(df, theme, period):
-    if df is None or df.empty:
+class RankingProcessor:
+    
+    @staticmethod
+    def _process_chunk_aggregation(chunk: pd.DataFrame, theme: str) -> pd.DataFrame:
+        chunk_clean = chunk.dropna(subset=['mun_corrigido']).copy()
+        
+        agg_configs = {
+            "Maior Risco de Fogo": {
+                'RiscoFogo': ['mean', 'max', 'count'],
+                'DataHora': ['min', 'max']
+            },
+            "Maior Precipitação (evento)": {
+                'Precipitacao': ['mean', 'max', 'sum', 'count'],
+                'DataHora': ['min', 'max']
+            },
+            "Máx. Dias Sem Chuva": {
+                'DiaSemChuva': ['mean', 'max', 'count'],
+                'DataHora': ['min', 'max']
+            }
+        }
+        
+        if theme in agg_configs:
+            return chunk_clean.groupby('mun_corrigido', observed=True).agg(agg_configs[theme])
+        
+        return pd.DataFrame()
+    
+    @staticmethod
+    def _combine_chunk_results(results: List[pd.DataFrame], theme: str) -> pd.DataFrame:
+        if not results:
+            return pd.DataFrame()
+        
+        combine_configs = {
+            "Maior Risco de Fogo": {
+                ('RiscoFogo', 'mean'): 'mean',
+                ('RiscoFogo', 'max'): 'max',
+                ('RiscoFogo', 'count'): 'sum',
+                ('DataHora', 'min'): 'min',
+                ('DataHora', 'max'): 'max'
+            },
+            "Maior Precipitação (evento)": {
+                ('Precipitacao', 'mean'): 'mean',
+                ('Precipitacao', 'max'): 'max',
+                ('Precipitacao', 'sum'): 'sum',
+                ('Precipitacao', 'count'): 'sum',
+                ('DataHora', 'min'): 'min',
+                ('DataHora', 'max'): 'max'
+            },
+            "Máx. Dias Sem Chuva": {
+                ('DiaSemChuva', 'mean'): 'mean',
+                ('DiaSemChuva', 'max'): 'max',
+                ('DiaSemChuva', 'count'): 'sum',
+                ('DataHora', 'min'): 'min',
+                ('DataHora', 'max'): 'max'
+            }
+        }
+        
+        if theme in combine_configs:
+            return pd.concat(results).groupby(level=0, observed=True).agg(combine_configs[theme])
+        
+        return pd.DataFrame()
+    
+    @staticmethod
+    def _format_ranking_result(df_agg: pd.DataFrame, theme: str) -> Tuple[pd.DataFrame, str]:
+        if df_agg.empty:
+            return pd.DataFrame(), ''
+        
+        formatters = {
+            "Maior Risco de Fogo": (
+                RankingProcessor._format_fire_risk_ranking,
+                'Risco Médio'
+            ),
+            "Maior Precipitação (evento)": (
+                RankingProcessor._format_precipitation_ranking,
+                'Precipitação Máxima (mm)'
+            ),
+            "Máx. Dias Sem Chuva": (
+                RankingProcessor._format_dry_days_ranking,
+                'Máx. Dias Sem Chuva'
+            )
+        }
+        
+        if theme in formatters:
+            formatter_func, col_name = formatters[theme]
+            df_rank = formatter_func(df_agg)
+            
+            if not df_rank.empty:
+                df_rank.insert(0, 'Posição', range(1, len(df_rank) + 1))
+            
+            return df_rank, col_name
+        
         return pd.DataFrame(), ''
     
-    try:
-        if len(df) > CHUNK_SIZE:
-            chunks = [df[i:i + CHUNK_SIZE] for i in range(0, len(df), CHUNK_SIZE)]
-            results = []
-            
-            for chunk in chunks:
-                chunk_clean = chunk.dropna(subset=['mun_corrigido']).copy()
+    @staticmethod
+    def _format_fire_risk_ranking(df_agg: pd.DataFrame) -> pd.DataFrame:
+        df_agg = df_agg.round(4)
+        df_rank = df_agg.nlargest(20, ('RiscoFogo', 'mean')).reset_index()
+        
+        df_rank.columns = ['Município', 'Risco Médio', 'Risco Máximo', 'Nº Registros', 
+                           'Primeira Ocorrência', 'Última Ocorrência']
+        
+        df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
+        df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
+        
+        return df_rank
+    
+    @staticmethod
+    def _format_precipitation_ranking(df_agg: pd.DataFrame) -> pd.DataFrame:
+        """Formata ranking de precipitação"""
+        df_agg = df_agg.round(2)
+        df_rank = df_agg.nlargest(20, ('Precipitacao', 'max')).reset_index()
+        
+        df_rank.columns = ['Município', 'Precipitação Máxima (mm)', 'Precipitação Média (mm)',
+                           'Precipitação Total (mm)', 'Nº Registros', 'Primeira Ocorrência', 
+                           'Última Ocorrência']
+        
+        df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
+        df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
+        
+        return df_rank
+    
+    @staticmethod
+    def _format_dry_days_ranking(df_agg: pd.DataFrame) -> pd.DataFrame:
+        df_agg = df_agg.round(1)
+        df_rank = df_agg.nlargest(20, ('DiaSemChuva', 'max')).reset_index()
+        
+        df_rank.columns = ['Município', 'Máx. Dias Sem Chuva', 'Média Dias Sem Chuva',
+                           'Nº Registros', 'Primeira Ocorrência', 'Última Ocorrência']
+        
+        df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
+        df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
+        
+        return df_rank
+    
+    def process_ranking(self, df: pd.DataFrame, theme: str, period: str) -> Tuple[pd.DataFrame, str]:
+        if df is None or df.empty:
+            return pd.DataFrame(), ''
+        
+        try:
+            if len(df) > CHUNK_SIZE:
+                chunks = [df[i:i + CHUNK_SIZE] for i in range(0, len(df), CHUNK_SIZE)]
+                results = []
                 
-                if theme == "Maior Risco de Fogo":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
-                        'RiscoFogo': ['mean', 'max', 'count'],
-                        'DataHora': ['min', 'max']
-                    })
-                    results.append(chunk_agg)
+                for chunk in chunks:
+                    chunk_result = self._process_chunk_aggregation(chunk, theme)
+                    if not chunk_result.empty:
+                        results.append(chunk_result)
+                    
+                    del chunk
+                    gc.collect()
                 
-                elif theme == "Maior Precipitação (evento)":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
-                        'Precipitacao': ['mean', 'max', 'sum', 'count'],
-                        'DataHora': ['min', 'max']
-                    })
-                    results.append(chunk_agg)
-                
-                elif theme == "Máx. Dias Sem Chuva":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
-                        'DiaSemChuva': ['mean', 'max', 'count'],
-                        'DataHora': ['min', 'max']
-                    })
-                    results.append(chunk_agg)
-                
-                del chunk_clean
+                df_agg = self._combine_chunk_results(results, theme)
+                del results
                 gc.collect()
-        
-            if theme == "Maior Risco de Fogo":
-                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
-                    ('RiscoFogo', 'mean'): 'mean',
-                    ('RiscoFogo', 'max'): 'max',
-                    ('RiscoFogo', 'count'): 'sum',
-                    ('DataHora', 'min'): 'min',
-                    ('DataHora', 'max'): 'max'
-                })
-            elif theme == "Maior Precipitação (evento)":
-                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
-                    ('Precipitacao', 'mean'): 'mean',
-                    ('Precipitacao', 'max'): 'max',
-                    ('Precipitacao', 'sum'): 'sum',
-                    ('Precipitacao', 'count'): 'sum',
-                    ('DataHora', 'min'): 'min',
-                    ('DataHora', 'max'): 'max'
-                })
-            elif theme == "Máx. Dias Sem Chuva":
-                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
-                    ('DiaSemChuva', 'mean'): 'mean',
-                    ('DiaSemChuva', 'max'): 'max',
-                    ('DiaSemChuva', 'count'): 'sum',
-                    ('DataHora', 'min'): 'min',
-                    ('DataHora', 'max'): 'max'
-                })
+            else:
+                df_agg = self._process_chunk_aggregation(df, theme)
             
-            del results
+            df_rank, col_ord = self._format_ranking_result(df_agg, theme)
+            
+            del df_agg
             gc.collect()
             
-        else:
-            df_clean = df.dropna(subset=['mun_corrigido']).copy()
+            return df_rank, col_ord
             
-            if theme == "Maior Risco de Fogo":
-                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
-                    'RiscoFogo': ['mean', 'max', 'count'],
-                    'DataHora': ['min', 'max']
-                })
-            
-            elif theme == "Maior Precipitação (evento)":
-                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
-                    'Precipitacao': ['mean', 'max', 'sum', 'count'],
-                    'DataHora': ['min', 'max']
-                })
-            
-            elif theme == "Máx. Dias Sem Chuva":
-                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
-                    'DiaSemChuva': ['mean', 'max', 'count'],
-                    'DataHora': ['min', 'max']
-                })
-            
-            del df_clean
-            gc.collect()
-
-        if theme == "Maior Risco de Fogo":
-            df_rank = formato_risco_rank(df_agg)
-            col_ord = 'Risco Médio'
-        
-        elif theme == "Maior Precipitação (evento)":
-            df_rank = formato_precip_rank(df_agg)
-            col_ord = 'Precipitação Máxima (mm)'
-        
-        elif theme == "Máx. Dias Sem Chuva":
-            df_rank = formato_rank(df_agg)
-            col_ord = 'Máx. Dias Sem Chuva'
-        
-        else:
+        except Exception:
             return pd.DataFrame(), ''
 
-        if not df_rank.empty:
-            df_rank.insert(0, 'Posição', range(1, len(df_rank) + 1))
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=3)
+def get_cached_data(year: Optional[int] = None) -> Optional[pd.DataFrame]:
+    processor = DataProcessor()
+    return processor.load_inpe_data(year)
+
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
+def get_available_years() -> List[int]:
+    processor = DataProcessor()
+    return processor.get_available_years()
+
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=5)
+def get_cached_ranking(df_hash: str, theme: str, period: str) -> Tuple[pd.DataFrame, str]:
+    parts = df_hash.split('_')
+    if len(parts) >= 2:
+        year_option = parts[0]
         
-        del df_agg
-        gc.collect()
-        return df_rank, col_ord
-
-    except Exception as e:
-        st.error(f"Erro ao preparar dados do ranking: {e}")
+        if year_option == "Todos":
+            df = get_cached_data(None)
+        else:
+            try:
+                year = int(year_option)
+                df = get_cached_data(year)
+            except ValueError:
+                df = get_cached_data(None)
+    else:
+        df = get_cached_data(None)
+    
+    if df is None:
         return pd.DataFrame(), ''
+    
+    processor = RankingProcessor()
+    return processor.process_ranking(df, theme, period)
 
-def formato_risco_rank(df_agg):
-    df_agg = df_agg.round(4)
-    df_rank = df_agg.nlargest(20, ('RiscoFogo', 'mean')).reset_index()
-    
-    df_rank.columns = ['Município', 'Risco Médio', 'Risco Máximo', 'Nº Registros', 
-                      'Primeira Ocorrência', 'Última Ocorrência']
-    
-    df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-    df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-    
-    return df_rank
+def initialize_data() -> Tuple[List[str], pd.DataFrame]:
+    try:
+        years = get_available_years()
+        year_options = ["Todos os Anos"] + [str(year) for year in years]
+        base_df = get_cached_data(None)
+        
+        return year_options, base_df if base_df is not None else pd.DataFrame()
+    except Exception:
+        return ["Todos os Anos"], pd.DataFrame()
 
-def formato_precip_rank(df_agg):
-    df_agg = df_agg.round(2)
-    df_rank = df_agg.nlargest(20, ('Precipitacao', 'max')).reset_index()
+def get_year_data(year_option: str, base_df: pd.DataFrame) -> pd.DataFrame:
+    if base_df.empty:
+        return pd.DataFrame()
     
-    df_rank.columns = ['Município', 'Precipitação Máxima (mm)', 'Precipitação Média (mm)',
-                      'Precipitação Total (mm)', 'Nº Registros', 'Primeira Ocorrência', 
-                      'Última Ocorrência']
-    
-    df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-    df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-    
-    return df_rank
-
-def formato_rank(df_agg):
-    df_agg = df_agg.round(1)
-    df_rank = df_agg.nlargest(20, ('DiaSemChuva', 'max')).reset_index()
-    
-    df_rank.columns = ['Município', 'Máx. Dias Sem Chuva', 'Média Dias Sem Chuva',
-                      'Nº Registros', 'Primeira Ocorrência', 'Última Ocorrência']
-    
-    df_rank['Primeira Ocorrência'] = pd.to_datetime(df_rank['Primeira Ocorrência']).dt.strftime('%d/%m/%Y')
-    df_rank['Última Ocorrência'] = pd.to_datetime(df_rank['Última Ocorrência']).dt.strftime('%d/%m/%Y')
-    
-    return df_rank
-
-YEAR_OPTIONS = ["Todos os Anos"] + inpe_anos()
-DF_BASE_ALL_YEARS = load_inpe_db(year=None)
-
-@st.cache_data(ttl=3600, show_spinner="Carregando dados...")
-def pegar_ano(year_option):
     if year_option == "Todos os Anos":
-        return DF_BASE_ALL_YEARS
+        return base_df
     else:
-        year = int(year_option)
-        return DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == year].copy()
+        try:
+            year = int(year_option)
+            return base_df[base_df['DataHora'].dt.year == year].copy()
+        except (ValueError, KeyError):
+            return pd.DataFrame()
 
-@st.cache_data(ttl=1800, show_spinner="Gerando gráficos...")
-def cache_graficos(df_year_hash, year_label):
-    if year_label == "Todos os Anos":
-        df_graf = DF_BASE_ALL_YEARS
-    else:
-        df_graf = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == int(year_label)]
+def render_interface():
+    YEAR_OPTIONS, DF_BASE = initialize_data()
     
-    return graficos_inpe(df_graf, year_label)
+    if DF_BASE.empty:
+        st.error("Dados não disponíveis.")
+        return
+    
+    st.header("Focos de Calor")
+    
+    ano_sel = st.selectbox(
+        'Período:',
+        YEAR_OPTIONS,
+        index=0,
+        key="ano_focos_calor"
+    )
 
-@st.cache_data(ttl=1800, show_spinner="Preparando ranking...")
-def cache_rank(df_year_hash, tema_rank, periodo_rank):
-    if "Todo o Período" in periodo_rank:
-        df_rank_base = DF_BASE_ALL_YEARS
-    else:
-        year = int(periodo_rank.split()[-1])
-        df_rank_base = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == year]
+    df_year = get_year_data(ano_sel, DF_BASE)
     
-    return preparar_rank(df_rank_base, tema_rank, periodo_rank)
+    if df_year.empty:
+        st.warning(f"Sem dados para {ano_sel}")
+        return
+
+    st.subheader("Ranking de Municípios")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        tema_rank = st.selectbox(
+            'Indicador:',
+            ["Maior Risco de Fogo", "Maior Precipitação (evento)", "Máx. Dias Sem Chuva"],
+            key="tema_ranking"
+        )
+    df_hash = f"{ano_sel}_{len(df_year)}_{tema_rank}"
+    periodo = "Todo o Período" if ano_sel == "Todos os Anos" else f"Ano {ano_sel}"
+    df_rank, col_ord = get_cached_ranking(df_hash, tema_rank, periodo)
+    
+    if not df_rank.empty:
+        st.dataframe(df_rank, use_container_width=True, hide_index=True)
+    else:
+        st.info("Dados não disponíveis para este ranking.")
 
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
 gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef', 'ha_total'] 
@@ -2485,7 +2626,9 @@ with tabs[3]:
             unsafe_allow_html=True
         )
 
-    if DF_BASE_ALL_YEARS is not None and not DF_BASE_ALL_YEARS.empty:
+    YEAR_OPTIONS, DF_BASE = initialize_data()
+    
+    if DF_BASE is not None and not DF_BASE.empty:
         ano_sel_graf = st.selectbox(
             'Período para gráficos:',
             YEAR_OPTIONS,
@@ -2493,7 +2636,7 @@ with tabs[3]:
             key="ano_focos_calor_global_tab3"
         )
         
-        df_graf = pegar_ano(ano_sel_graf)
+        df_graf = get_year_data(ano_sel_graf, DF_BASE)
         
         ano_param = None if ano_sel_graf == "Todos os Anos" else int(ano_sel_graf)
         display_graf = ("todo o período histórico" if ano_param is None else f"o ano de {ano_param}")
@@ -2501,7 +2644,7 @@ with tabs[3]:
         if not df_graf.empty:
             df_hash = f"{ano_sel_graf}_{len(df_graf)}"
             
-            figs = cache_graficos(df_hash, ano_sel_graf)
+            figs = graficos_inpe(df_graf, ano_sel_graf)
             
             st.subheader("Evolução Temporal do Risco de Fogo")
             st.plotly_chart(figs['temporal'], use_container_width=True)
@@ -2540,9 +2683,9 @@ with tabs[3]:
 
         st.subheader(f"Ranking por {tema_rank} ({periodo_rank})")
         
-        rank_hash = f"{ano_sel_rank}_{tema_rank}_{len(pegar_ano(ano_sel_rank))}"
+        rank_hash = f"{ano_sel_rank}_{tema_rank}_{len(get_year_data(ano_sel_rank, DF_BASE))}"
         
-        df_rank, col_ord = cache_rank(rank_hash, tema_rank, periodo_rank)
+        df_rank, col_ord = get_cached_ranking(rank_hash, tema_rank, periodo_rank)
         
         if df_rank is not None and not df_rank.empty:
             st.dataframe(df_rank, use_container_width=True, hide_index=True)
