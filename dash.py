@@ -368,7 +368,7 @@ def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
 
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
     try:
-        fig = px.choropleth_mapbox(
+        fig = px.choropleth_map(
             gdf_cnuc_filtered,
             geojson=gdf_cnuc_filtered.__geo_interface__,
             locations=gdf_cnuc_filtered.index,
@@ -405,7 +405,7 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 ]
             
             if not sigef_plot.empty:
-                fig_sigef = px.choropleth_mapbox(
+                fig_sigef = px.choropleth_map(
                     sigef_plot,
                     geojson=sigef_plot.__geo_interface__,
                     locations=sigef_plot.index,
@@ -1468,7 +1468,7 @@ DB_PORT = '5432'
 SCHEMA = 'CPT'
 TABLE = 'queimadas'
 
-CHUNK_SIZE = 20000
+CHUNK_SIZE = 10000
 
 def create_engine_connection():
     try:
@@ -1628,21 +1628,21 @@ def preparar_rank(df, theme, period):
                 chunk_clean = chunk.dropna(subset=['mun_corrigido']).copy()
                 
                 if theme == "Maior Risco de Fogo":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido').agg({
+                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
                         'RiscoFogo': ['mean', 'max', 'count'],
                         'DataHora': ['min', 'max']
                     })
                     results.append(chunk_agg)
                 
                 elif theme == "Maior Precipitação (evento)":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido').agg({
+                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
                         'Precipitacao': ['mean', 'max', 'sum', 'count'],
                         'DataHora': ['min', 'max']
                     })
                     results.append(chunk_agg)
                 
                 elif theme == "Máx. Dias Sem Chuva":
-                    chunk_agg = chunk_clean.groupby('mun_corrigido').agg({
+                    chunk_agg = chunk_clean.groupby('mun_corrigido', observed=True).agg({
                         'DiaSemChuva': ['mean', 'max', 'count'],
                         'DataHora': ['min', 'max']
                     })
@@ -1652,7 +1652,7 @@ def preparar_rank(df, theme, period):
                 gc.collect()
         
             if theme == "Maior Risco de Fogo":
-                df_agg = pd.concat(results).groupby(level=0).agg({
+                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
                     ('RiscoFogo', 'mean'): 'mean',
                     ('RiscoFogo', 'max'): 'max',
                     ('RiscoFogo', 'count'): 'sum',
@@ -1660,7 +1660,7 @@ def preparar_rank(df, theme, period):
                     ('DataHora', 'max'): 'max'
                 })
             elif theme == "Maior Precipitação (evento)":
-                df_agg = pd.concat(results).groupby(level=0).agg({
+                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
                     ('Precipitacao', 'mean'): 'mean',
                     ('Precipitacao', 'max'): 'max',
                     ('Precipitacao', 'sum'): 'sum',
@@ -1669,7 +1669,7 @@ def preparar_rank(df, theme, period):
                     ('DataHora', 'max'): 'max'
                 })
             elif theme == "Máx. Dias Sem Chuva":
-                df_agg = pd.concat(results).groupby(level=0).agg({
+                df_agg = pd.concat(results).groupby(level=0, observed=True).agg({
                     ('DiaSemChuva', 'mean'): 'mean',
                     ('DiaSemChuva', 'max'): 'max',
                     ('DiaSemChuva', 'count'): 'sum',
@@ -1684,19 +1684,19 @@ def preparar_rank(df, theme, period):
             df_clean = df.dropna(subset=['mun_corrigido']).copy()
             
             if theme == "Maior Risco de Fogo":
-                df_agg = df_clean.groupby('mun_corrigido').agg({
+                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
                     'RiscoFogo': ['mean', 'max', 'count'],
                     'DataHora': ['min', 'max']
                 })
             
             elif theme == "Maior Precipitação (evento)":
-                df_agg = df_clean.groupby('mun_corrigido').agg({
+                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
                     'Precipitacao': ['mean', 'max', 'sum', 'count'],
                     'DataHora': ['min', 'max']
                 })
             
             elif theme == "Máx. Dias Sem Chuva":
-                df_agg = df_clean.groupby('mun_corrigido').agg({
+                df_agg = df_clean.groupby('mun_corrigido', observed=True).agg({
                     'DiaSemChuva': ['mean', 'max', 'count'],
                     'DataHora': ['min', 'max']
                 })
@@ -1769,6 +1769,33 @@ def formato_rank(df_agg):
 
 YEAR_OPTIONS = ["Todos os Anos"] + inpe_anos()
 DF_BASE_ALL_YEARS = load_inpe_db(year=None)
+
+@st.cache_data(ttl=3600, show_spinner="Carregando dados...")
+def pegar_ano(year_option):
+    if year_option == "Todos os Anos":
+        return DF_BASE_ALL_YEARS
+    else:
+        year = int(year_option)
+        return DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == year].copy()
+
+@st.cache_data(ttl=1800, show_spinner="Gerando gráficos...")
+def cache_graficos(df_year_hash, year_label):
+    if year_label == "Todos os Anos":
+        df_graf = DF_BASE_ALL_YEARS
+    else:
+        df_graf = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == int(year_label)]
+    
+    return graficos_inpe(df_graf, year_label)
+
+@st.cache_data(ttl=1800, show_spinner="Preparando ranking...")
+def cache_rank(df_year_hash, tema_rank, periodo_rank):
+    if "Todo o Período" in periodo_rank:
+        df_rank_base = DF_BASE_ALL_YEARS
+    else:
+        year = int(periodo_rank.split()[-1])
+        df_rank_base = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == year]
+    
+    return preparar_rank(df_rank_base, tema_rank, periodo_rank)
 
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
 gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef', 'ha_total'] 
@@ -2465,16 +2492,17 @@ with tabs[3]:
             index=0, 
             key="ano_focos_calor_global_tab3"
         )
+        
+        df_graf = pegar_ano(ano_sel_graf)
+        
         ano_param = None if ano_sel_graf == "Todos os Anos" else int(ano_sel_graf)
         display_graf = ("todo o período histórico" if ano_param is None else f"o ano de {ano_param}")
-        
-        if ano_param is None:
-            df_graf = DF_BASE_ALL_YEARS
-        else:
-            df_graf = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == ano_param].copy()
 
         if not df_graf.empty:
-            figs = graficos_inpe(df_graf, ano_sel_graf)
+            df_hash = f"{ano_sel_graf}_{len(df_graf)}"
+            
+            figs = cache_graficos(df_hash, ano_sel_graf)
+            
             st.subheader("Evolução Temporal do Risco de Fogo")
             st.plotly_chart(figs['temporal'], use_container_width=True)
             st.caption(f"Figura: Evolução mensal do risco médio de fogo para {display_graf}.")
@@ -2508,23 +2536,18 @@ with tabs[3]:
             )
         
         ano_rank_param = None if ano_sel_rank == "Todos os Anos" else int(ano_sel_rank)
-        
-        if ano_rank_param is None:
-            df_rank_base = DF_BASE_ALL_YEARS
-        else:
-            df_rank_base = DF_BASE_ALL_YEARS[DF_BASE_ALL_YEARS['DataHora'].dt.year == ano_rank_param].copy()
-            
         periodo_rank = ("Todo o Período Histórico" if ano_rank_param is None else f"Ano de {ano_rank_param}")
 
         st.subheader(f"Ranking por {tema_rank} ({periodo_rank})")
-        if not df_rank_base.empty:
-            df_rank, col_ord = preparar_rank(df_rank_base, tema_rank, periodo_rank)
-            if df_rank is not None and not df_rank.empty:
-                st.dataframe(df_rank, use_container_width=True, hide_index=True)
-            else:
-                st.info("Sem dados válidos para este ranking.")
+        
+        rank_hash = f"{ano_sel_rank}_{tema_rank}_{len(pegar_ano(ano_sel_rank))}"
+        
+        df_rank, col_ord = cache_rank(rank_hash, tema_rank, periodo_rank)
+        
+        if df_rank is not None and not df_rank.empty:
+            st.dataframe(df_rank, use_container_width=True, hide_index=True)
         else:
-            st.warning("Nenhum dado para o período selecionado.")
+            st.info("Sem dados válidos para este ranking.")
     else:
         st.error("Não foi possível carregar os dados de queimadas. Verifique a conexão com o banco de dados.")
 
