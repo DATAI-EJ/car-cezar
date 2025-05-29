@@ -9,4 +9,4 @@ duckdb
 fiona
 pyproj
 rtree
-pyarrow
+psycopg2
