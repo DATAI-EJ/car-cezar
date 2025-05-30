@@ -188,7 +188,6 @@ px.bar = _patched_px_bar
 
 @st.cache_data(persist="disk")
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
-    """Carrega um shapefile, calcula áreas e percentuais, e otimiza tipos de dados."""
     gdf = gpd.read_file(caminho, columns=columns or [])
     
     gdf["geometry"] = gdf["geometry"].apply(lambda geom: geom.buffer(0) if geom and not geom.is_valid else geom)
@@ -304,70 +303,108 @@ def load_csv(uploaded_file, columns: list[str] = None) -> pd.DataFrame:
                 except Exception:
                     pass
     return df
+
+LISTA_MUNICIPIOS_INTERESSE_RAW = [
+    'SÃO FÉLIX DO XINGU', 'ALTAMIRA', 'ITAITUBA',
+    'JACAREACANGA', 'NOVO PROGRESSO'
+]
+
+def limpar_texto_para_matching(text_input: any) -> str:
+    if pd.isna(text_input):
+        return ""
     
+    cleaned_text = str(text_input).strip().lower()
+    if not cleaned_text:
+        return ""
+    cleaned_text = unicodedata.normalize('NFD', cleaned_text)\
+                              .encode('ascii', 'ignore')\
+                              .decode('utf-8')
+    return cleaned_text
+
+LISTA_MUNICIPIOS_INTERESSE_LIMPA = [limpar_texto_para_matching(m) for m in LISTA_MUNICIPIOS_INTERESSE_RAW]
+LISTA_MUNICIPIOS_INTERESSE_LIMPA = [m for m in LISTA_MUNICIPIOS_INTERESSE_LIMPA if m]
+
+MAP_LIMPO_PARA_ORIGINAL_TITULO = {
+    limpar_texto_para_matching(orig_name): orig_name.title()
+    for orig_name in LISTA_MUNICIPIOS_INTERESSE_RAW
+}
+
 @st.cache_data(persist="disk")
 def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
+    df_colunas_resultado = ['Município', 'Total_Famílias', 'Número_Conflitos']
     try:
-        df = pd.read_excel(arquivo_excel, sheet_name='Áreas em Conflito', usecols=['mun', 'Famílias', 'Nome do Conflito']).dropna(how='all')
+        df_conflitos = pd.read_excel(
+            arquivo_excel,
+            sheet_name=SHEET_CONFLITOS,
+            usecols=COLUNAS_CONFLITOS
+        ).dropna(how='all', subset=COLUNAS_CONFLITOS)
+    except FileNotFoundError:
+        st.error(f"Erro: O arquivo '{arquivo_excel}' não foi encontrado.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    except ValueError as ve:
+        st.error(f"Erro ao ler o arquivo Excel (verifique o nome da planilha '{SHEET_CONFLITOS}' e o formato): {ve}")
+        return pd.DataFrame(columns=df_colunas_resultado)
     except Exception as e:
-        st.error(f"Erro ao ler o arquivo Excel de conflitos: {e}")
-        return pd.DataFrame()
+        st.error(f"Erro inesperado ao ler o arquivo Excel de conflitos: {e}")
+        return pd.DataFrame(columns=df_colunas_resultado)
 
-    lista_original = ['SÃO FÉLIX DO XINGU', 'ALTAMIRA', 'ITAITUBA',
-                      'JACAREACANGA', 'NOVO PROGRESSO']
+    if df_conflitos.empty:
+        st.warning("O arquivo de conflitos está vazio ou não contém dados nas colunas especificadas.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    
+    df_conflitos['mun_str'] = df_conflitos['mun'].astype(str).fillna('') 
+    df_conflitos['mun_list'] = df_conflitos['mun_str'].str.replace(';', ',').str.split(',')
+    df_exploded = df_conflitos.explode('mun_list')
+    df_exploded['mun_limpo'] = df_exploded['mun_list'].apply(limpar_texto_para_matching)
+    df_exploded = df_exploded[df_exploded['mun_limpo'] != ""].copy()
 
-    def clean_mun_name(name):
-        if pd.isna(name):
-            return None
-        name = str(name).strip().lower()
-        name = unicodedata.normalize('NFD', name).encode('ascii', 'ignore').decode('utf-8')
-        return name
+    if df_exploded.empty:
+        st.warning("Nenhum nome de município válido encontrado nos dados de conflitos após a limpeza inicial.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    df_exploded['Famílias'] = pd.to_numeric(df_exploded['Famílias'], errors='coerce').fillna(0)
+    df_exploded['Famílias'] = pd.to_numeric(df_exploded['Famílias'], downcast='integer')
+    df_contendo_mun_interesse = df_exploded[df_exploded['mun_limpo'].isin(LISTA_MUNICIPIOS_INTERESSE_LIMPA)]
+    
+    if df_contendo_mun_interesse.empty:
+        st.warning(f"Nenhum dos municípios de interesse ({', '.join(LISTA_MUNICIPIOS_INTERESSE_RAW)}) foi encontrado nos dados de conflitos.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    nomes_conflitos_relevantes = df_contendo_mun_interesse['Nome do Conflito'].unique()
+    df_para_rateio = df_exploded[df_exploded['Nome do Conflito'].isin(nomes_conflitos_relevantes)].copy()
+    if df_para_rateio.empty: 
+        st.warning("Falha ao isolar dados de conflitos relevantes para o rateio. Verifique a consistência dos dados.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    df_para_rateio['num_mun_no_conflito'] = df_para_rateio.groupby('Nome do Conflito', observed=False)['mun_limpo']\
+                                                       .transform('nunique')
+    df_para_rateio['familias_rateadas_por_mun'] = df_para_rateio['Famílias'] / df_para_rateio['num_mun_no_conflito'].replace(0, 1)
+    df_final_para_agregacao = df_para_rateio[df_para_rateio['mun_limpo'].isin(LISTA_MUNICIPIOS_INTERESSE_LIMPA)].copy()
 
-    lista_limpa = [clean_mun_name(m) for m in lista_original]
-    lista_limpa = [m for m in lista_limpa if m is not None] 
-
-    df['mun_limpo_list'] = df['mun'].apply(lambda x: [
-        clean_mun_name(m) for m in str(x).replace(';', ',').split(',')
-    ])
-    df_exploded = df.explode('mun_limpo_list')
-    df_exploded = df_exploded[df_exploded['mun_limpo_list'].notna() & (df_exploded['mun_limpo_list'] != '')].copy()
-    df_filtered = df_exploded[df_exploded['mun_limpo_list'].isin(lista_limpa)].copy()
-
-    if df_filtered.empty:
-        st.warning("Nenhum município da lista de interesse encontrado nos dados de conflitos após a limpeza.")
-        return pd.DataFrame(columns=['Município', 'Total_Famílias', 'Número_Conflitos'])
-
-    df_filtered['Famílias'] = pd.to_numeric(df_filtered['Famílias'], errors='coerce').fillna(0)
-    df_filtered['Famílias'] = pd.to_numeric(df_filtered['Famílias'], downcast='integer', errors='coerce')
-    conflitos_presentes = df_filtered['Nome do Conflito'].unique()
-    df_conflitos_relevantes = df_exploded[df_exploded['Nome do Conflito'].isin(conflitos_presentes)].copy()
-
-    df_conflitos_relevantes['num_mun'] = df_conflitos_relevantes.groupby('Nome do Conflito', observed=False)['mun_limpo_list'].transform('nunique')
-    df_conflitos_relevantes['Fam_por_mun'] = df_conflitos_relevantes['Famílias'] / df_conflitos_relevantes['num_mun']
-
-    df_conflitos_relevantes['num_mun'] = pd.to_numeric(df_conflitos_relevantes['num_mun'], downcast='integer', errors='coerce')
-    df_conflitos_relevantes['Fam_por_mun'] = pd.to_numeric(df_conflitos_relevantes['Fam_por_mun'], downcast='float', errors='coerce')
-
-    res = df_conflitos_relevantes.groupby('mun_limpo_list', observed=False).agg({
-        'Fam_por_mun':'sum', 
-        'Nome do Conflito':'count'
-    }).reset_index()
-
-    res.columns = ['Município_Limpo','Total_Famílias','Número_Conflitos']
-    res = res.rename(columns={'Município_Limpo': 'Município'})
-    cleaned_to_original_map = {clean_mun_name(orig): orig.title() for orig in lista_original}
-    res['Município'] = res['Município'].map(cleaned_to_original_map).fillna(res['Município']) 
-
-    res['Total_Famílias'] = pd.to_numeric(res['Total_Famílias'], downcast='integer', errors='coerce')
-    res['Número_Conflitos'] = pd.to_numeric(res['Número_Conflitos'], downcast='integer', errors='coerce')
-
-    if not res.empty and len(res['Município'].unique()) / len(res) < 0.5:
+    if df_final_para_agregacao.empty:
+        st.warning("Nenhum dado para agregar para os municípios de interesse após o processo de rateio.")
+        return pd.DataFrame(columns=df_colunas_resultado)
+    df_resultado = df_final_para_agregacao.groupby('mun_limpo', observed=False).agg(
+        Total_Famílias_Rateadas=('familias_rateadas_por_mun', 'sum'),
+        Número_Conflitos_Distintos=('Nome do Conflito', 'nunique')
+    ).reset_index()
+    df_resultado = df_resultado.rename(columns={
+        'mun_limpo': 'Município',
+        'Total_Famílias_Rateadas': 'Total_Famílias',
+        'Número_Conflitos_Distintos': 'Número_Conflitos'
+    })
+    df_resultado['Município'] = df_resultado['Município'].map(MAP_LIMPO_PARA_ORIGINAL_TITULO)\
+                                                     .fillna(df_resultado['Município']) 
+    df_resultado['Total_Famílias'] = pd.to_numeric(df_resultado['Total_Famílias'], errors='coerce').fillna(0)
+    df_resultado['Total_Famílias'] = pd.to_numeric(df_resultado['Total_Famílias'], downcast='integer')
+    df_resultado['Número_Conflitos'] = pd.to_numeric(df_resultado['Número_Conflitos'], downcast='integer', errors='coerce').fillna(0)
+    df_resultado = df_resultado[df_colunas_resultado]
+    if not df_resultado.empty and 'Município' in df_resultado.columns:
         try:
-            res['Município'] = res['Município'].astype('category')
+            if pd.api.types.is_string_dtype(df_resultado['Município']):
+                if df_resultado['Município'].nunique() < len(df_resultado) * 0.5:
+                    df_resultado['Município'] = df_resultado['Município'].astype('category')
         except Exception:
-            pass
-
-    return res
+            pass 
+    
+    return df_resultado
 
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
     try:
@@ -1521,7 +1558,6 @@ class DataProcessor:
         ]
     
     def _check_memory_usage(self) -> bool:
-        """Verifica uso de memória"""
         return psutil.virtual_memory().percent < MEMORY_THRESHOLD
     
     def _optimize_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1842,17 +1878,17 @@ class RankingProcessor:
         except Exception:
             return pd.DataFrame(), ''
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=3)
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=2)  
 def get_cached_data(year: Optional[int] = None) -> Optional[pd.DataFrame]:
     processor = DataProcessor()
     return processor.load_inpe_data(year)
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1) 
 def get_available_years() -> List[int]:
     processor = DataProcessor()
     return processor.get_available_years()
 
-@st.cache_data(ttl=1800, show_spinner=False, max_entries=5)
+@st.cache_data(ttl=900, show_spinner=False, max_entries=3) 
 def get_cached_ranking(df_hash: str, theme: str, period: str) -> Tuple[pd.DataFrame, str]:
     parts = df_hash.split('_')
     if len(parts) >= 2:
@@ -1943,7 +1979,8 @@ gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 
 gdf_sigef_cols = ['geometry', 'municipio', 'area_km2', 'invadindo']
 df_csv_cols = ["Unnamed: 0", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
 df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador', 'ultima_atualizaçao']
-
+COLUNAS_CONFLITOS = ['mun', 'Famílias', 'Nome do Conflito']
+SHEET_CONFLITOS = 'Áreas em Conflito'
 
 gdf_alertas_raw = carregar_shapefile(
     r"alertas.shp",
@@ -1991,21 +2028,65 @@ df_confmun_raw = carregar_dados_conflitos_municipio(
 
 @st.cache_data(persist="disk")
 def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
-    df = pd.read_csv(caminho, sep=";", encoding="windows-1252", usecols=columns)
+    date_columns_to_parse = []
+    if 'data_ajuizamento' in columns:
+        date_columns_to_parse.append('data_ajuizamento')
+    if 'ultima_atualizaçao' in columns:
+        date_columns_to_parse.append('ultima_atualizaçao')
+
+    try:
+        df = pd.read_csv(
+            caminho, 
+            sep=";", 
+            encoding="windows-1252",
+            usecols=columns,
+            parse_dates=date_columns_to_parse if date_columns_to_parse else None,
+            dayfirst=True, 
+            low_memory=False 
+        )
+    except FileNotFoundError:
+        st.error(f"Erro: Arquivo não encontrado em '{caminho}'. Verifique o caminho.")
+        return pd.DataFrame(columns=columns)
+    except Exception as e:
+        st.error(f"Erro ao ler o arquivo CSV '{caminho}': {e}")
+        return pd.DataFrame(columns=columns) 
+
     for col in df.columns:
-        if df[col].dtype == 'float64':
-            df[col] = pd.to_numeric(df[col], downcast='float', errors='coerce')
-        elif df[col].dtype == 'int64':
-            df[col] = pd.to_numeric(df[col], downcast='integer', errors='coerce')
-        elif df[col].dtype == 'object':
-            if len(df[col].unique()) / len(df) < 0.5:
-                 try:
+        if df[col].dtype == 'object':
+            try:
+                converted_col = pd.to_numeric(df[col])
+                df[col] = converted_col 
+            except ValueError:
+                if not df[col].dropna().empty and len(df[col].unique()) / len(df[col].dropna()) < 0.5: # Heurística para 'category'
+                    try:
+                        df[col] = df[col].astype('category')
+                    except Exception as e_cat:
+                        print(f"Aviso: Não foi possível converter a coluna '{col}' para category. Erro: {e_cat}")
+                        pass
+                elif df[col].dropna().empty:
                     df[col] = df[col].astype('category')
-                 except Exception:
+                try:
+                    df[col] = df[col].astype('category')
+                except Exception as e_cat:
+                    print(f"Aviso: Não foi possível converter a coluna '{col}' (apenas NAs) para category. Erro: {e_cat}")
                     pass
+        if df[col].dtype == 'float64':
+            df[col] = pd.to_numeric(df[col], downcast='float')
+        elif df[col].dtype == 'int64':
+            df[col] = pd.to_numeric(df[col], downcast='integer')
+
+    if 'data_ajuizamento' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['data_ajuizamento']):
+        df['data_ajuizamento'] = pd.to_datetime(df['data_ajuizamento'], errors='coerce', dayfirst=True)
+    if 'ultima_atualizaçao' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['ultima_atualizaçao']):
+        df['ultima_atualizaçao'] = pd.to_datetime(df['ultima_atualizaçao'], errors='coerce', dayfirst=True)
+    if 'data_ajuizamento' in df.columns and pd.api.types.is_datetime64_any_dtype(df['data_ajuizamento']):
+        df['ano'] = df['data_ajuizamento'].dt.year.astype('Int64') 
+    elif 'data_ajuizamento' in df.columns: 
+        df['ano'] = pd.Series([pd.NA] * len(df), dtype='Int64')
+
     return df
 
-df_proc_raw    = load_df_proc(
+df_proc_raw = load_df_proc(
     r"processos_tjpa_completo_atualizada_pronto.csv",
     columns=df_proc_cols
 )
@@ -2321,8 +2402,8 @@ with tabs[1]:
     st.divider()
 
 with tabs[2]:
-    st.header("Processos Judiciais")
-    
+    st.header("Processos Judiciais (Otimizado)")
+
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
         Esta análise apresenta dados sobre processos judiciais relacionados a questões ambientais, incluindo:
@@ -2331,23 +2412,23 @@ with tabs[2]:
         - Assuntos
         - Órgãos julgadores
         
-        Os dados são provenientes do Tribunal de Justiça do Estado do Pará.
+        Os dados são provenientes do Tribunal de Justiça do Estado do Pará (exemplo).
         """)
-    
+
     st.markdown(
         "**Fonte Geral da Seção:** CNJ - Conselho Nacional de Justiça.",
         unsafe_allow_html=True
     )
-    
-    if 'data_ajuizamento' in df_proc_raw.columns:
-        df_proc_raw['data_ajuizamento'] = pd.to_datetime(df_proc_raw['data_ajuizamento'], errors='coerce')
-    if 'ultima_atualizaçao' in df_proc_raw.columns:
-        df_proc_raw['ultima_atualizaçao'] = pd.to_datetime(df_proc_raw['ultima_atualizaçao'], errors='coerce')
 
-    figs_j = fig_justica(df_proc_raw)
-    
+    if not df_proc_raw.empty:
+        figs_j = fig_justica(df_proc_raw)
+    else:
+        figs_j = {} 
+        st.warning("Não foi possível carregar os dados dos processos. Algumas visualizações podem não estar disponíveis.")
+
+
     cols = st.columns(2, gap="large")
-    
+
     with cols[0]:
         st.markdown("""
         <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
@@ -2357,9 +2438,9 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'mun' in figs_j and figs_j['mun'] is not None:
-            st.plotly_chart(figs_j['mun'].update_layout(height=400), use_container_width=True, key="jud_mun")
+            st.plotly_chart(figs_j['mun'].update_layout(height=400), use_container_width=True, key="jud_mun_opt_tab")
         else:
-            st.warning("Gráfico de municípios não pôde ser gerado.")
+            st.warning("Gráfico de municípios não pôde ser gerado (sem dados ou erro).")
         
         st.caption("Figura 4.1: Top 10 municípios com mais processos.")
         with st.expander("ℹ️ Detalhes e Fonte da Figura 4.1", expanded=False):
@@ -2369,7 +2450,7 @@ with tabs[2]:
             
             **Fonte:** CNJ - Conselho Nacional de Justiça.
             """)
-    
+
     with cols[1]:
         st.markdown("""
         <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin-bottom:0.5rem;">
@@ -2379,9 +2460,9 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'class' in figs_j and figs_j['class'] is not None:
-            st.plotly_chart(figs_j['class'].update_layout(height=400), use_container_width=True, key="jud_class")
+            st.plotly_chart(figs_j['class'].update_layout(height=400), use_container_width=True, key="jud_class_opt_tab")
         else:
-            st.warning("Gráfico de classes não pôde ser gerado.")
+            st.warning("Gráfico de classes não pôde ser gerado (sem dados ou erro).")
         
         st.caption("Figura 4.2: Top 10 classes processuais.")
         with st.expander("ℹ️ Detalhes e Fonte da Figura 4.2", expanded=False):
@@ -2391,7 +2472,7 @@ with tabs[2]:
             
             **Fonte:** CNJ - Conselho Nacional de Justiça.
             """)
-    
+
     cols2 = st.columns(2, gap="large")
     
     with cols2[0]:
@@ -2403,7 +2484,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'ass' in figs_j and figs_j['ass'] is not None:
-            st.plotly_chart(figs_j['ass'].update_layout(height=400), use_container_width=True, key="jud_ass")
+            st.plotly_chart(figs_j['ass'].update_layout(height=400), use_container_width=True, key="jud_ass_opt_tab")
         else:
             st.warning("Gráfico de assuntos não pôde ser gerado.")
         
@@ -2425,7 +2506,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'org' in figs_j and figs_j['org'] is not None:
-            st.plotly_chart(figs_j['org'].update_layout(height=400), use_container_width=True, key="jud_org")
+            st.plotly_chart(figs_j['org'].update_layout(height=400), use_container_width=True, key="jud_org_opt_tab")
         else:
             st.warning("Gráfico de órgãos julgadores não pôde ser gerado.")
         
@@ -2446,7 +2527,7 @@ with tabs[2]:
     """, unsafe_allow_html=True)
     
     if 'temp' in figs_j and figs_j['temp'] is not None:
-        st.plotly_chart(figs_j['temp'], use_container_width=True, key="jud_temp")
+        st.plotly_chart(figs_j['temp'], use_container_width=True, key="jud_temp_opt_tab")
     else:
         st.warning("Gráfico de evolução temporal não pôde ser gerado.")
     
@@ -2458,125 +2539,129 @@ with tabs[2]:
         
         **Fonte:** CNJ - Conselho Nacional de Justiça.
         """)
+
     st.markdown("""
     <div style="background:#fff;border-radius:6px;padding:1.5rem;box-shadow:0 2px 4px rgba(0,0,0,0.1);margin:1rem 0 .5rem 0;">
     <h3 style="margin:0 0 .5rem 0;">Análise Interativa de Processos</h3>
     <p style="margin:0;font-size:.95em;color:#666;">Tabela com filtros para análise detalhada dos dados.</p>
     </div>
     """, unsafe_allow_html=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
+
+    col1_filter, col2_filter = st.columns(2)
+    ano_selecionado = "Todos os anos" 
+
+    with col1_filter:
         tipo_analise = st.selectbox(
             "Escolha o tipo de análise:",
             ["Municípios com mais processos", "Órgãos mais atuantes", "Classes processuais mais frequentes", "Assuntos mais recorrentes", "Dados gerais relevantes"],
-            key="tipo_analise_proc"
+            key="tipo_analise_proc_opt_tab"
         )
-    
-    with col2:
-        if 'data_ajuizamento' in df_proc_raw.columns:
-            df_proc_raw['ano'] = pd.to_datetime(df_proc_raw['data_ajuizamento'], errors='coerce').dt.year
-            anos_disponiveis = sorted([ano for ano in df_proc_raw['ano'].dropna().unique() if not pd.isna(ano)])
+
+    with col2_filter:
+        if 'ano' in df_proc_raw.columns and not df_proc_raw['ano'].dropna().empty:
+            anos_disponiveis = sorted([int(ano) for ano in df_proc_raw['ano'].dropna().unique() if pd.notna(ano)])
             if anos_disponiveis:
                 ano_selecionado = st.selectbox(
                     "Filtrar por ano:",
                     ["Todos os anos"] + anos_disponiveis,
-                    key="ano_filter_proc"
+                    key="ano_filter_proc_opt_tab"
                 )
             else:
-                ano_selecionado = "Todos os anos"
+                st.info("Não há dados de ano disponíveis para filtro.")
         else:
-            ano_selecionado = "Todos os anos"
+            st.info("Coluna 'ano' não encontrada ou vazia. Filtro por ano desabilitado.")
+
+    df_para_tabela = pd.DataFrame()
+    if not df_proc_raw.empty:
+        if ano_selecionado != "Todos os anos" and 'ano' in df_proc_raw.columns:
+            try:
+                ano_selecionado_int = int(ano_selecionado)
+                df_para_tabela = df_proc_raw[df_proc_raw['ano'] == ano_selecionado_int].copy()
+            except ValueError:
+                st.warning(f"Ano selecionado '{ano_selecionado}' inválido. Mostrando todos os anos.")
+                df_para_tabela = df_proc_raw.copy()
+        else:
+            df_para_tabela = df_proc_raw.copy()
     
-    df_proc_filtered_year = df_proc_raw.copy()
-    if ano_selecionado != "Todos os anos":
-        df_proc_filtered_year = df_proc_filtered_year[df_proc_filtered_year['ano'] == ano_selecionado]
-    
-    df_filtrado = df_proc_filtered_year.copy()
 
-    if tipo_analise == "Municípios com mais processos":
-        if 'municipio' in df_filtrado.columns and 'numero_processo' in df_filtrado.columns and 'data_ajuizamento' in df_filtrado.columns:
-            df_filtrado['municipio'] = df_filtrado['municipio'].apply(clean_text)
-            tabela_resumo = df_filtrado.groupby('municipio', observed=False).agg({
-                'numero_processo': 'count',
-                'data_ajuizamento': ['min', 'max']
-            }).round(2)
-            tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
-            tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(20)
-            tabela_resumo = tabela_resumo.reset_index()
-            
-            st.dataframe(tabela_resumo, use_container_width=True)
-            st.caption("Tabela 4.1: Top 20 municípios com mais processos judiciais.")
-        else:
-             st.info("Dados insuficientes para gerar esta tabela.")
+    if not df_para_tabela.empty:
+        cols_to_clean_for_table = ['municipio', 'orgao_julgador', 'classe', 'assuntos']
+        for col_clean in cols_to_clean_for_table:
+            if col_clean in df_para_tabela.columns:
+                df_para_tabela[col_clean] = df_para_tabela[col_clean].astype(str).apply(clean_text)
+
+        if tipo_analise == "Municípios com mais processos":
+            if 'municipio' in df_para_tabela.columns and 'numero_processo' in df_para_tabela.columns and 'data_ajuizamento' in df_para_tabela.columns:
+                tabela_resumo = df_para_tabela.groupby('municipio', observed=True).agg(
+                    Total_de_Processos=('numero_processo', 'count'),
+                    Primeiro_Processo=('data_ajuizamento', 'min'),
+                    Ultimo_Processo=('data_ajuizamento', 'max')
+                ).reset_index()
+                tabela_resumo.columns = ['Município', 'Total de Processos', 'Primeiro Processo', 'Último Processo']
+                tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(20)
+                st.dataframe(tabela_resumo, use_container_width=True)
+                st.caption("Tabela 4.1: Top 20 municípios com mais processos judiciais.")
+            else:
+                st.info("Dados insuficientes para gerar a tabela de municípios.")
         
-    elif tipo_analise == "Órgãos mais atuantes":
-        if 'orgao_julgador' in df_filtrado.columns and 'numero_processo' in df_filtrado.columns and 'data_ajuizamento' in df_filtrado.columns:
-            df_filtrado['orgao_julgador'] = df_filtrado['orgao_julgador'].apply(clean_text)
-            tabela_resumo = df_filtrado.groupby('orgao_julgador', observed=False).agg({
-                'numero_processo': 'count',
-                'data_ajuizamento': ['min', 'max']
-            }).round(2)
-            tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
-            tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
-            tabela_resumo = tabela_resumo.reset_index()
-            
-            st.dataframe(tabela_resumo, use_container_width=True)
-            st.caption("Tabela 4.1: Top 15 órgãos julgadores mais atuantes.")
-        else:
-             st.info("Dados insuficientes para gerar esta tabela.")
+        elif tipo_analise == "Órgãos mais atuantes":
+            if 'orgao_julgador' in df_para_tabela.columns and 'numero_processo' in df_para_tabela.columns and 'data_ajuizamento' in df_para_tabela.columns:
+                tabela_resumo = df_para_tabela.groupby('orgao_julgador', observed=True).agg(
+                    Total_de_Processos=('numero_processo', 'count'),
+                    Primeiro_Processo=('data_ajuizamento', 'min'),
+                    Ultimo_Processo=('data_ajuizamento', 'max')
+                ).reset_index()
+                tabela_resumo.columns = ['Órgão Julgador', 'Total de Processos', 'Primeiro Processo', 'Último Processo']
+                tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+                st.dataframe(tabela_resumo, use_container_width=True)
+                st.caption("Tabela 4.1: Top 15 órgãos julgadores mais atuantes.")
+            else:
+                st.info("Dados insuficientes para gerar a tabela de órgãos julgadores.")
 
-    elif tipo_analise == "Classes processuais mais frequentes":
-        if 'classe' in df_filtrado.columns and 'numero_processo' in df_filtrado.columns and 'data_ajuizamento' in df_filtrado.columns:
-            df_filtrado['classe'] = df_filtrado['classe'].apply(clean_text)
-            tabela_resumo = df_filtrado.groupby('classe', observed=False).agg({
-                'numero_processo': 'count',
-                'data_ajuizamento': ['min', 'max']
-            }).round(2)
-            tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
-            tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
-            tabela_resumo = tabela_resumo.reset_index()
-            
-            st.dataframe(tabela_resumo, use_container_width=True)
-            st.caption("Tabela 4.1: Top 15 classes processuais mais frequentes.")
-        else:
-             st.info("Dados insuficientes para gerar esta tabela.")
+        elif tipo_analise == "Classes processuais mais frequentes":
+            if 'classe' in df_para_tabela.columns and 'numero_processo' in df_para_tabela.columns and 'data_ajuizamento' in df_para_tabela.columns:
+                tabela_resumo = df_para_tabela.groupby('classe', observed=True).agg(
+                    Total_de_Processos=('numero_processo', 'count'),
+                    Primeiro_Processo=('data_ajuizamento', 'min'),
+                    Ultimo_Processo=('data_ajuizamento', 'max')
+                ).reset_index()
+                tabela_resumo.columns = ['Classe Processual', 'Total de Processos', 'Primeiro Processo', 'Último Processo']
+                tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+                st.dataframe(tabela_resumo, use_container_width=True)
+                st.caption("Tabela 4.1: Top 15 classes processuais mais frequentes.")
+            else:
+                st.info("Dados insuficientes para gerar a tabela de classes processuais.")
 
-    elif tipo_analise == "Assuntos mais recorrentes":
-        if 'assuntos' in df_filtrado.columns and 'numero_processo' in df_filtrado.columns and 'data_ajuizamento' in df_filtrado.columns:
-            df_filtrado['assuntos'] = df_filtrado['assuntos'].apply(clean_text)
-            tabela_resumo = df_filtrado.groupby('assuntos', observed=False).agg({
-                'numero_processo': 'count',
-                'data_ajuizamento': ['min', 'max']
-            }).round(2)
-            tabela_resumo.columns = ['Total de Processos', 'Primeiro Processo', 'Último Processo']
-            tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
-            tabela_resumo = tabela_resumo.reset_index()
-            
-            st.dataframe(tabela_resumo, use_container_width=True)
-            st.caption("Tabela 4.1: Top 15 assuntos mais recorrentes.")
-        else:
-             st.info("Dados insuficientes para gerar esta tabela.")
-
-    else: 
-        colunas_relevantes = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador']
-        colunas_existentes = [col for col in colunas_relevantes if col in df_filtrado.columns]
+        elif tipo_analise == "Assuntos mais recorrentes":
+            if 'assuntos' in df_para_tabela.columns and 'numero_processo' in df_para_tabela.columns and 'data_ajuizamento' in df_para_tabela.columns:
+                tabela_resumo = df_para_tabela.groupby('assuntos', observed=True).agg(
+                    Total_de_Processos=('numero_processo', 'count'),
+                    Primeiro_Processo=('data_ajuizamento', 'min'),
+                    Ultimo_Processo=('data_ajuizamento', 'max')
+                ).reset_index()
+                tabela_resumo.columns = ['Assunto', 'Total de Processos', 'Primeiro Processo', 'Último Processo']
+                tabela_resumo = tabela_resumo.sort_values('Total de Processos', ascending=False).head(15)
+                st.dataframe(tabela_resumo, use_container_width=True)
+                st.caption("Tabela 4.1: Top 15 assuntos mais recorrentes.")
+            else:
+                st.info("Dados insuficientes para gerar a tabela de assuntos.")
         
-        if colunas_existentes:
-            df_relevante = df_filtrado[colunas_existentes].copy()
+        elif tipo_analise == "Dados gerais relevantes":
+            colunas_relevantes_display = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador']
+            colunas_existentes_display = [col for col in colunas_relevantes_display if col in df_para_tabela.columns]
             
-            for col in ['municipio', 'classe', 'assuntos', 'orgao_julgador']:
-                if col in df_relevante.columns:
-                    df_relevante[col] = df_relevante[col].apply(clean_text)
-            
-            if 'data_ajuizamento' in df_relevante.columns:
-                df_relevante = df_relevante.sort_values('data_ajuizamento', ascending=False)
-            
-            st.dataframe(df_relevante.head(500), use_container_width=True)
-            st.caption("Tabela 4.1: Dados gerais relevantes dos processos judiciais (limitado a 500 registros).")
-        else:
-            st.info("Não foi possível carregar os dados relevantes.")
+            if colunas_existentes_display:
+                df_display_geral = df_para_tabela[colunas_existentes_display].copy()
+                if 'data_ajuizamento' in df_display_geral.columns:
+                    df_display_geral.loc[:, 'data_ajuizamento'] = pd.to_datetime(df_display_geral['data_ajuizamento'], errors='coerce')
+                    df_display_geral = df_display_geral.sort_values('data_ajuizamento', ascending=False)
+                
+                st.dataframe(df_display_geral.head(500), use_container_width=True)
+                st.caption("Tabela 4.1: Dados gerais relevantes (limitado a 500 registros).")
+            else:
+                st.info("Não foi possível carregar os dados relevantes.")
+    else:
+        st.info("Não há dados para exibir na tabela com os filtros selecionados ou o DataFrame inicial está vazio.")
     
     with st.expander("ℹ️ Sobre esta tabela", expanded=False):
         if tipo_analise == "Municípios com mais processos":
