@@ -186,7 +186,7 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
 
 px.bar = _patched_px_bar
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
     """Carrega um shapefile, calcula áreas e percentuais, e otimiza tipos de dados."""
     gdf = gpd.read_file(caminho, columns=columns or [])
@@ -247,7 +247,7 @@ def preparar_hectares(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
     return gdf2
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def load_csv(uploaded_file, columns: list[str] = None) -> pd.DataFrame:
     usecols_arg = None
     if columns is not None:
@@ -305,7 +305,7 @@ def load_csv(uploaded_file, columns: list[str] = None) -> pd.DataFrame:
                     pass
     return df
     
-@st.cache_data
+@st.cache_data(persist="disk")
 def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
     try:
         df = pd.read_excel(arquivo_excel, sheet_name='Áreas em Conflito', usecols=['mun', 'Famílias', 'Nome do Conflito']).dropna(how='all')
@@ -1989,7 +1989,7 @@ df_confmun_raw = carregar_dados_conflitos_municipio(
     r"CPTF-PA.xlsx"
 )
 
-@st.cache_data
+@st.cache_data(persist="disk")
 def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
     df = pd.read_csv(caminho, sep=";", encoding="windows-1252", usecols=columns)
     for col in df.columns:
