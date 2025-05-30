@@ -2402,7 +2402,7 @@ with tabs[1]:
     st.divider()
 
 with tabs[2]:
-    st.header("Processos Judiciais (Otimizado)")
+    st.header("Processos Judiciais")
 
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
