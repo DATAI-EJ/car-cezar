@@ -1401,14 +1401,20 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
         fig.update_layout(title="Mapa de Alertas (Desmatamento)")
         return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
 
-    gdf_alertas_filtered['AREAHA'] = pd.to_numeric(gdf_alertas_filtered['AREAHA'], errors='coerce')
+    if not gdf_alertas_filtered.empty and 'geometry' in gdf_alertas_filtered.columns:
+        gdf_alertas_for_map = gdf_alertas_filtered.copy()
+        gdf_alertas_for_map['geometry'] = gdf_alertas_for_map.geometry.simplify(tolerance=0.001, preserve_topology=True)
+    else:
+        gdf_alertas_for_map = gdf_alertas_filtered 
+
+    gdf_alertas_for_map['AREAHA'] = pd.to_numeric(gdf_alertas_for_map['AREAHA'], errors='coerce')
 
     try:
-        gdf_proj = gdf_alertas_filtered.to_crs("EPSG:31983").copy()
+        gdf_proj = gdf_alertas_for_map.to_crs("EPSG:31983")
         centroids_proj = gdf_proj.geometry.centroid
         centroids_geo = centroids_proj.to_crs("EPSG:4326")
 
-        gdf_map = gdf_alertas_filtered.to_crs("EPSG:4326").copy()
+        gdf_map = gdf_alertas_for_map.to_crs("EPSG:4326")
         gdf_map['Latitude'] = centroids_geo.y
         gdf_map['Longitude'] = centroids_geo.x
 
@@ -1425,10 +1431,10 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
         fig.update_layout(title="Mapa de Alertas (Desmatamento)")
         return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
 
-    minx, miny, maxx, maxy = gdf_map.total_bounds
-    center = {'lat': (miny + maxy) / 2, 'lon': (minx + maxx) / 2}
-    span_lat = maxy - miny
-    lon_range = maxx - minx
+    minx, miny, maxx, maxy = gdf_map.total_bounds 
+    center = {'lat': (miny + maxy) / 2, 'lon': (minx + maxx) / 2} 
+    span_lat = maxy - miny 
+    lon_range = maxx - minx 
     max_range = max(span_lat, lon_range, 0.01)
 
     zoom_level = 3.5
@@ -1452,7 +1458,7 @@ def fig_desmatamento_mapa_pontos(gdf_alertas_filtered: gpd.GeoDataFrame) -> go.F
         return _apply_layout(fig, title="Mapa de Alertas (Desmatamento)", title_size=16)
 
     fig = px.scatter_map(
-        gdf_map_plot,
+        gdf_map_plot, 
         lat='Latitude',
         lon='Longitude',
         size='AREAHA',
@@ -1982,50 +1988,6 @@ df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'a
 COLUNAS_CONFLITOS = ['mun', 'Famílias', 'Nome do Conflito']
 SHEET_CONFLITOS = 'Áreas em Conflito'
 
-gdf_alertas_raw = carregar_shapefile(
-    r"alertas.shp",
-    calcular_percentuais=False,
-    columns=gdf_alertas_cols
-)
-gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
-
-gdf_cnuc_raw = carregar_shapefile(
-    r"cnuc.shp",
-    columns=gdf_cnuc_cols
-)
-if 'ha_total' not in gdf_cnuc_raw.columns:
-    gdf_cnuc_raw['ha_total'] = gdf_cnuc_raw.get('area_km2', 0) * 100
-    gdf_cnuc_raw['ha_total'] = pd.to_numeric(gdf_cnuc_raw['ha_total'], downcast='float', errors='coerce')
-
-gdf_cnuc_ha_raw = preparar_hectares(gdf_cnuc_raw)
-
-gdf_sigef_raw = carregar_shapefile(
-    r"sigef.shp",
-    calcular_percentuais=False,
-    columns=gdf_sigef_cols
-)
-gdf_sigef_raw   = gdf_sigef_raw.rename(columns={"id":"id_sigef"})
-
-if 'MUNICIPIO' in gdf_sigef_raw.columns and 'municipio' not in gdf_sigef_raw.columns:
-    gdf_sigef_raw = gdf_sigef_raw.rename(columns={'MUNICIPIO': 'municipio'})
-elif 'municipio' not in gdf_sigef_raw.columns:
-    st.warning("Coluna 'municipio' ou 'MUNICIPIO' não encontrada em sigef.shp. Adicionando coluna placeholder.")
-    gdf_sigef_raw['municipio'] = None 
-
-limites = gdf_cnuc_raw.total_bounds
-centro = {
-    "lat": (limites[1] + limites[3]) / 2,
-    "lon": (limites[0] + limites[2]) / 2
-}
-
-df_csv_raw = load_csv(
-    r"CPT-PA-count.csv", 
-    columns=df_csv_cols
-)
-df_confmun_raw = carregar_dados_conflitos_municipio(
-    r"CPTF-PA.xlsx"
-)
-
 @st.cache_data(persist="disk")
 def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
     date_columns_to_parse = []
@@ -2086,14 +2048,49 @@ def load_df_proc(caminho: str, columns: list[str]) -> pd.DataFrame:
 
     return df
 
-df_proc_raw = load_df_proc(
-    r"processos_tjpa_completo_atualizada_pronto.csv",
-    columns=df_proc_cols
-)
-
 tabs = st.tabs(["Sobreposições", "CPT", "Justiça", "Queimadas", "Desmatamento"])
 
 with tabs[0]:
+    gdf_alertas_raw = carregar_shapefile(
+        r"alertas.shp",
+        calcular_percentuais=False,
+        columns=gdf_alertas_cols
+    )
+    gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
+
+    gdf_cnuc_raw = carregar_shapefile(
+        r"cnuc.shp",
+        columns=gdf_cnuc_cols
+    )
+    if 'ha_total' not in gdf_cnuc_raw.columns:
+        gdf_cnuc_raw['ha_total'] = gdf_cnuc_raw.get('area_km2', 0) * 100
+        gdf_cnuc_raw['ha_total'] = pd.to_numeric(gdf_cnuc_raw['ha_total'], downcast='float', errors='coerce')
+
+    gdf_cnuc_ha_raw = preparar_hectares(gdf_cnuc_raw)
+
+    gdf_sigef_raw = carregar_shapefile(
+        r"sigef.shp",
+        calcular_percentuais=False,
+        columns=gdf_sigef_cols
+    )
+    gdf_sigef_raw   = gdf_sigef_raw.rename(columns={"id":"id_sigef"})
+
+    if 'MUNICIPIO' in gdf_sigef_raw.columns and 'municipio' not in gdf_sigef_raw.columns:
+        gdf_sigef_raw = gdf_sigef_raw.rename(columns={'MUNICIPIO': 'municipio'})
+    elif 'municipio' not in gdf_sigef_raw.columns:
+        st.warning("Coluna 'municipio' ou 'MUNICIPIO' não encontrada em sigef.shp. Adicionando coluna placeholder.")
+        gdf_sigef_raw['municipio'] = None
+
+    limites = gdf_cnuc_raw.total_bounds
+    centro = {
+        "lat": (limites[1] + limites[3]) / 2,
+        "lon": (limites[0] + limites[2]) / 2
+    }
+
+    df_csv_raw = load_csv(
+        r"CPT-PA-count.csv",
+        columns=df_csv_cols
+    )
     st.header("Sobreposições")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
@@ -2146,7 +2143,13 @@ with tabs[0]:
         invadindo_opcao_temp = st.selectbox("Tipo de sobreposição:", opcoes_invadindo, index=0, help="Selecione o tipo de área sobreposta para análise")
         invadindo_opcao = None if invadindo_opcao_temp == "Selecione" else invadindo_opcao_temp
         gdf_cnuc_map = gdf_cnuc_raw.copy()
+        if not gdf_cnuc_map.empty:
+            gdf_cnuc_map['geometry'] = gdf_cnuc_map.geometry.simplify(tolerance=0.001, preserve_topology=True)
+
         gdf_sigef_map = gdf_sigef_raw.copy()
+        if not gdf_sigef_map.empty:
+            gdf_sigef_map['geometry'] = gdf_sigef_map.geometry.simplify(tolerance=0.001, preserve_topology=True)
+
         ids_selecionados_map = []
 
         if invadindo_opcao and invadindo_opcao.lower() != "todos":
@@ -2258,6 +2261,13 @@ with tabs[0]:
     st.divider()
 
 with tabs[1]:
+    df_confmun_raw = carregar_dados_conflitos_municipio(
+        r"CPTF-PA.xlsx"
+    )
+    df_csv_raw = load_csv(
+        r"CPT-PA-count.csv",
+        columns=df_csv_cols
+    )
     st.header("Impacto Social")
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
         st.write("""
@@ -2402,6 +2412,10 @@ with tabs[1]:
     st.divider()
 
 with tabs[2]:
+    df_proc_raw = load_df_proc(
+        r"processos_tjpa_completo_atualizada_pronto.csv",
+        columns=df_proc_cols
+    )
     st.header("Processos Judiciais")
 
     with st.expander("ℹ️ Sobre esta seção", expanded=True):
@@ -2796,6 +2810,23 @@ with tabs[4]:
             "**Fonte Geral da Seção:** MapBiomas Alerta. Plataforma de Dados de Alertas de Desmatamento. Disponível em: https://alerta.mapbiomas.org/. Acesso em: maio de 2025.",
             unsafe_allow_html=True
         )
+
+    # Lazy load gdf_alertas_raw for Desmatamento tab
+    gdf_alertas_raw = carregar_shapefile(
+        r"alertas.shp",
+        calcular_percentuais=False,
+        columns=gdf_alertas_cols
+    )
+    gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
+
+    # Lazy load gdf_cnuc_raw for Desmatamento tab
+    gdf_cnuc_raw = carregar_shapefile(
+        r"cnuc.shp",
+        columns=gdf_cnuc_cols
+    )
+    if 'ha_total' not in gdf_cnuc_raw.columns:
+        gdf_cnuc_raw['ha_total'] = gdf_cnuc_raw.get('area_km2', 0) * 100
+        gdf_cnuc_raw['ha_total'] = pd.to_numeric(gdf_cnuc_raw['ha_total'], downcast='float', errors='coerce')
 
     st.write("**Filtro Global:**")
     anos_disponiveis = ['Todos'] + sorted(gdf_alertas_raw['ANODETEC'].dropna().unique().tolist())
