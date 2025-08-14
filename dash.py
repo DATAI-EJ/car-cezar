@@ -13,7 +13,42 @@ import logging
 import psutil
 from io import BytesIO
 
+def safe_format_number(value, decimals=1):
+    """
+    Função segura para formatação de números nos cards
+    """
+    try:
+        if pd.isna(value) or value is None:
+            return "0"
+        
+        # Converter para float se necessário
+        num_value = float(value)
+        
+        # Se for zero ou muito pequeno
+        if abs(num_value) < 0.001:
+            return "0"
+        
+        # Formatação brasileira
+        if decimals == 0:
+            return f"{num_value:,.0f}".replace(',', '.')
+        else:
+            formatted = f"{num_value:,.{decimals}f}"
+            # Trocar . e , para formato brasileiro
+            if '.' in formatted:
+                parts = formatted.split('.')
+                integer_part = parts[0].replace(',', '.')
+                decimal_part = parts[1]
+                return f"{integer_part},{decimal_part}"
+            else:
+                return formatted.replace(',', '.')
+                
+    except (ValueError, TypeError, AttributeError):
+        return "Erro"
+
 def format_number_with_dots(number, decimal_places=1):
+    """
+    Formata número com separador brasileiro (ponto para milhares, vírgula para decimais)
+    """
     if pd.isna(number) or number is None:
         return "0"
     
@@ -21,20 +56,27 @@ def format_number_with_dots(number, decimal_places=1):
         num = float(number)
         if num == 0:
             return "0"
-        
         if decimal_places == 0:
             formatted = f"{num:,.0f}"
         else:
             formatted = f"{num:,.{decimal_places}f}"
         if '.' in formatted:
             parts = formatted.split('.')
-            integer_part = parts[0].replace(',', '.')
-            decimal_part = parts[1]
-            return f"{integer_part},{decimal_part}"
+            integer_part = parts[0]
+            decimal_part = parts[1] if len(parts) > 1 else ""
+            integer_part = integer_part.replace(',', '.')
+            if decimal_part and decimal_places > 0:
+                return f"{integer_part},{decimal_part}"
+            else:
+                return integer_part
         else:
             return formatted.replace(',', '.')
-    except (ValueError, TypeError):
-        return str(number)
+            
+    except (ValueError, TypeError, AttributeError) as e:
+        try:
+            return f"{float(number):,.{decimal_places}f}".replace(',', '.')
+        except:
+            return str(number) if number is not None else "0"
 
 def create_custom_tickformat(values):
     if not values:
@@ -56,7 +98,6 @@ def preparar_dados_especificos(gdf_input):
         return None
     
     df_download = gdf_input.copy()
-    # Remover geometria se existir
     if 'geometry' in df_download.columns:
         df_download = df_download.drop('geometry', axis=1)
     
@@ -2408,6 +2449,19 @@ with tabs[0]:
     area_alertas_ucs = gdf_cnuc_filtrado['alerta_km2'].sum() * 100 if not gdf_cnuc_filtrado.empty and 'alerta_km2' in gdf_cnuc_filtrado.columns else 0
     area_cars_ucs = gdf_cnuc_filtrado['sigef_km2'].sum() * 100 if not gdf_cnuc_filtrado.empty and 'sigef_km2' in gdf_cnuc_filtrado.columns else 0
     
+    # Garantir que os valores sejam números válidos
+    try:
+        area_total_ucs = float(area_total_ucs) if pd.notna(area_total_ucs) else 0
+        area_alertas_ucs = float(area_alertas_ucs) if pd.notna(area_alertas_ucs) else 0
+        area_cars_ucs = float(area_cars_ucs) if pd.notna(area_cars_ucs) else 0
+    except (ValueError, TypeError):
+        area_total_ucs = 0
+        area_alertas_ucs = 0
+        area_cars_ucs = 0
+    
+    # Debug: verificar valores (pode remover depois)
+    # st.write(f"DEBUG - area_total_ucs: {area_total_ucs}, tipo: {type(area_total_ucs)}")
+    
     # Calcular dados para municípios (filtrados por estado)
     municipios_para = ['Altamira', 'São Félix do Xingu', 'Itaituba', 'Jacareacanga', 'Novo Progresso', 'Trairão']
     if estado_selecionado == 'PA' or estado_selecionado == 'Pará':
@@ -2419,6 +2473,12 @@ with tabs[0]:
     alertas_municipios = len(gdf_alertas_filtrado_cards) if not gdf_alertas_filtrado_cards.empty else 0
     area_alertas_municipios = gdf_alertas_filtrado_cards['AREAHA'].sum() if not gdf_alertas_filtrado_cards.empty and 'AREAHA' in gdf_alertas_filtrado_cards.columns else 0
     cars_municipios = len(gdf_sigef_raw) if not gdf_sigef_raw.empty else 0
+    
+    # Garantir que os valores sejam números válidos
+    try:
+        area_alertas_municipios = float(area_alertas_municipios) if pd.notna(area_alertas_municipios) else 0
+    except (ValueError, TypeError):
+        area_alertas_municipios = 0
     
     card_template = """
     <div style="
@@ -2442,10 +2502,10 @@ with tabs[0]:
     st.markdown("### Unidades de Conservação:")
     cols_uc = st.columns(4, gap="small")
     titulos_uc = [
-        ("UCs", format_number_with_dots(total_ucs, 0), "Total de Unidades de Conservação"),
-        ("Área Total UCs (ha)", format_number_with_dots(area_total_ucs, 1), "Área total das UCs em hectares"),
-        ("Área Alertas UCs (ha)", format_number_with_dots(area_alertas_ucs, 1), "Área de alertas em UCs (ha)"),
-        ("Área CARs UCs (ha)", format_number_with_dots(area_cars_ucs, 1), "Área de CARs em UCs (ha)")
+        ("UCs", safe_format_number(total_ucs, 0), "Total de Unidades de Conservação"),
+        ("Área Total UCs (ha)", safe_format_number(area_total_ucs, 1), "Área total das UCs em hectares"),
+        ("Área Alertas UCs (ha)", safe_format_number(area_alertas_ucs, 1), "Área de alertas em UCs (ha)"),
+        ("Área CARs UCs (ha)", safe_format_number(area_cars_ucs, 1), "Área de CARs em UCs (ha)")
     ]
     for col, (t, v, d) in zip(cols_uc, titulos_uc):
         col.markdown(card_template.format(t, v, d), unsafe_allow_html=True)
@@ -2454,10 +2514,10 @@ with tabs[0]:
     st.markdown(titulo_regiao)
     cols_mun = st.columns(4, gap="small")
     titulos_mun = [
-        ("Municípios", format_number_with_dots(total_municipios, 0), f"Municípios em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
-        ("Alertas Totais", format_number_with_dots(alertas_municipios, 0), f"Alertas em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
-        ("Área Alertas (ha)", format_number_with_dots(area_alertas_municipios, 1), "Área total de alertas (ha)"),
-        ("CARs Totais", format_number_with_dots(cars_municipios, 0), f"CARs em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}")
+        ("Municípios", safe_format_number(total_municipios, 0), f"Municípios em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
+        ("Alertas Totais", safe_format_number(alertas_municipios, 0), f"Alertas em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
+        ("Área Alertas (ha)", safe_format_number(area_alertas_municipios, 1), "Área total de alertas (ha)"),
+        ("CARs Totais", safe_format_number(cars_municipios, 0), f"CARs em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}")
     ]
     for col, (t, v, d) in zip(cols_mun, titulos_mun):
         col.markdown(card_template.format(t, v, d), unsafe_allow_html=True)
