@@ -287,6 +287,39 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
 px.bar = _patched_px_bar
 
 @st.cache_data
+def carregar_shapefile_cloud_safe(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
+    """
+    Versão mais robusta para carregamento de shapefiles no cloud
+    """
+    try:
+        if not os.path.exists(caminho):
+            st.error(f"❌ Arquivo não encontrado: {caminho}")
+            return gpd.GeoDataFrame()
+        
+        # Tentar carregar o shapefile
+        gdf = gpd.read_file(caminho)
+        
+        if gdf.empty:
+            st.warning(f"⚠️ Shapefile {caminho} está vazio")
+            return gpd.GeoDataFrame()
+        
+        if columns:
+            available_cols = [col for col in columns if col in gdf.columns]
+            missing_cols = [col for col in columns if col not in gdf.columns]
+            
+            if missing_cols:
+                st.warning(f"⚠️ Colunas não encontradas em {caminho}: {missing_cols}")
+                
+            if available_cols:
+                gdf = gdf[available_cols]
+        
+        return gdf
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar {caminho}: {str(e)}")
+        return gpd.GeoDataFrame()
+
+@st.cache_data
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
     """Carrega um shapefile, calcula áreas e percentuais, e otimiza tipos de dados."""
     gdf = gpd.read_file(caminho, columns=columns or [])
@@ -1334,7 +1367,6 @@ def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str, gd
                         zoom=zoom_level,
                         center=centro_map
                     ),
-                    height=600,
                     margin=dict(l=0, r=0, t=40, b=0),
                     showlegend=False 
                 )
@@ -2332,9 +2364,10 @@ def render_interface():
         st.dataframe(df_rank, use_container_width=True, hide_index=True)
     else:
         st.info("Dados não disponíveis para este ranking.")
-
+import os
+files_to_check = ["cnuc.shp", "alertas.shp", "sigef.shp"]
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
-gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef', 'ha_total'] 
+gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef'] 
 gdf_sigef_cols = ['geometry', 'municipio', 'area_km2', 'invadindo']
 df_csv_cols = ["Unnamed: 0", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
 df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador', 'ultima_atualizaçao']
@@ -2347,10 +2380,16 @@ gdf_alertas_raw = carregar_shapefile(
 )
 gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
 
-gdf_cnuc_raw = carregar_shapefile(
+gdf_cnuc_raw = carregar_shapefile_cloud_safe(
     r"cnuc.shp",
     columns=gdf_cnuc_cols
 )
+
+# Debug inicial - comentar após correção
+# st.write(f"🔍 Debug Inicial: GDF CNUC carregado - {len(gdf_cnuc_raw)} registros")
+# if not gdf_cnuc_raw.empty:
+#     st.write(f"🔍 Debug Inicial: Colunas CNUC: {list(gdf_cnuc_raw.columns)}")
+
 if 'ha_total' not in gdf_cnuc_raw.columns:
     gdf_cnuc_raw['ha_total'] = gdf_cnuc_raw.get('area_km2', 0) * 100
     gdf_cnuc_raw['ha_total'] = pd.to_numeric(gdf_cnuc_raw['ha_total'], downcast='float', errors='coerce')
@@ -2443,13 +2482,20 @@ with tabs[0]:
     if estado_selecionado != 'Todos':
         gdf_alertas_filtrado_cards = gdf_alertas_filtrado_cards[gdf_alertas_filtrado_cards['ESTADO'] == estado_selecionado]
     
-    # Calcular dados para UCs (filtradas)
     total_ucs = len(gdf_cnuc_filtrado) if not gdf_cnuc_filtrado.empty else 0
-    area_total_ucs = gdf_cnuc_filtrado['ha_total'].sum() if not gdf_cnuc_filtrado.empty and 'ha_total' in gdf_cnuc_filtrado.columns else 0
-    area_alertas_ucs = gdf_cnuc_filtrado['alerta_km2'].sum() * 100 if not gdf_cnuc_filtrado.empty and 'alerta_km2' in gdf_cnuc_filtrado.columns else 0
-    area_cars_ucs = gdf_cnuc_filtrado['sigef_km2'].sum() * 100 if not gdf_cnuc_filtrado.empty and 'sigef_km2' in gdf_cnuc_filtrado.columns else 0
+
+    area_total_ucs = 0
+    area_alertas_ucs = 0
+    area_cars_ucs = 0
     
-    # Garantir que os valores sejam números válidos
+    if not gdf_cnuc_filtrado.empty:
+        if 'ha_total' in gdf_cnuc_filtrado.columns:
+            area_total_ucs = gdf_cnuc_filtrado['ha_total'].sum()
+        if 'alerta_km2' in gdf_cnuc_filtrado.columns:
+            area_alertas_ucs = gdf_cnuc_filtrado['alerta_km2'].sum() * 100 
+        if 'sigef_km2' in gdf_cnuc_filtrado.columns:
+            area_cars_ucs = gdf_cnuc_filtrado['sigef_km2'].sum() * 100  
+    
     try:
         area_total_ucs = float(area_total_ucs) if pd.notna(area_total_ucs) else 0
         area_alertas_ucs = float(area_alertas_ucs) if pd.notna(area_alertas_ucs) else 0
@@ -2458,9 +2504,6 @@ with tabs[0]:
         area_total_ucs = 0
         area_alertas_ucs = 0
         area_cars_ucs = 0
-    
-    # Debug: verificar valores (pode remover depois)
-    # st.write(f"DEBUG - area_total_ucs: {area_total_ucs}, tipo: {type(area_total_ucs)}")
     
     # Calcular dados para municípios (filtrados por estado)
     municipios_para = ['Altamira', 'São Félix do Xingu', 'Itaituba', 'Jacareacanga', 'Novo Progresso', 'Trairão']
@@ -3183,9 +3226,8 @@ with tabs[3]:
                 st.plotly_chart(figs['top_risco'], use_container_width=True)
             with col2:
                 st.subheader("Mapa de Distribuição dos Focos de Calor")
-                st.plotly_chart(figs['mapa'], use_container_width=True, config={'scrollZoom': True})
+                st.plotly_chart(figs['mapa'], use_container_width=True, height=500, config={'scrollZoom': True})
             
-            # Adicionar nova linha com precipitação e focos por UC
             st.divider()
             col3, col4 = st.columns(2, gap="large")
             with col3:
