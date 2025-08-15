@@ -2755,16 +2755,7 @@ with tabs[0]:
     with row1_chart1:
         st.subheader("Áreas por UC")
         st.plotly_chart(fig_sobreposicoes_mapbiomas(gdf_cnuc_raw, gdf_alertas_raw), use_container_width=True, height=350)
-        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação (dados MapBiomas).")
-        
-        # Nota sobre padronização metodológica
-        st.success("""
-        ✅ **Dados unificados:**
-        
-        Esta visualização agora utiliza os mesmos dados do MapBiomas Alerta da aba "Desmatamento", 
-        garantindo consistência entre as análises.
-        """)
-        
+        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação (dados MapBiomas).") 
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
             **Interpretação:**
@@ -3800,3 +3791,4 @@ with tabs[4]:
         st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
+
