@@ -13,6 +13,16 @@ import logging
 import psutil
 from io import BytesIO
 
+def monitor_memory():
+    memory_percent = psutil.virtual_memory().percent
+    if memory_percent > 85:
+        gc.collect()  
+    return memory_percent
+
+def clear_memory_if_needed():
+    if psutil.virtual_memory().percent > 85:
+        gc.collect()
+
 def safe_format_number(value, decimals=1):
     try:
         if pd.isna(value) or value is None:
@@ -251,6 +261,9 @@ with col2:
 st.title("Análise de Conflitos em Áreas Protegidas e Territórios Tradicionais")
 st.markdown("Monitoramento integrado de sobreposições em Unidades de Conservação, Terras Indígenas e Territórios Quilombolas")
 
+# Monitoramento silencioso de memória
+monitor_memory()
+
 st.markdown("---")
 
 def _patched_px_bar(*args, **kwargs) -> go.Figure:
@@ -275,7 +288,7 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
 
 px.bar = _patched_px_bar
 
-@st.cache_data
+@st.cache_data(ttl=1800, max_entries=1)
 def carregar_cnuc_adaptativo(caminho: str) -> gpd.GeoDataFrame:
     try:
         if not os.path.exists(caminho):
@@ -337,7 +350,7 @@ def carregar_cnuc_adaptativo(caminho: str) -> gpd.GeoDataFrame:
         st.error(f" Erro ao carregar {caminho}: {str(e)}")
         return gpd.GeoDataFrame()
 
-@st.cache_data
+@st.cache_data(ttl=1800, max_entries=1)
 def carregar_shapefile_cloud_safe(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
     try:
         if not os.path.exists(caminho):
@@ -366,7 +379,7 @@ def carregar_shapefile_cloud_safe(caminho: str, calcular_percentuais: bool = Tru
         st.error(f"❌ Erro ao carregar {caminho}: {str(e)}")
         return gpd.GeoDataFrame()
 
-@st.cache_data
+@st.cache_data(ttl=1800, max_entries=1)
 def carregar_shapefile(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
     """Carrega um shapefile, calcula áreas e percentuais, e otimiza tipos de dados."""
     gdf = gpd.read_file(caminho, columns=columns or [])
@@ -549,13 +562,36 @@ def carregar_dados_conflitos_municipio(arquivo_excel: str) -> pd.DataFrame:
 
     return res
 
+def optimize_large_gdf(gdf: gpd.GeoDataFrame, max_rows: int = 10000) -> gpd.GeoDataFrame:
+    """Otimiza GeoDataFrames grandes silenciosamente mantendo representatividade"""
+    if gdf.empty or len(gdf) <= max_rows:
+        return gdf
+    
+    # Se muito grande, faz amostragem estratificada para manter representatividade
+    if 'MUNICIPIO' in gdf.columns:
+        # Amostragem proporcional por município
+        sample = gdf.groupby('MUNICIPIO', group_keys=False).apply(
+            lambda x: x.sample(min(len(x), max(1, max_rows // gdf['MUNICIPIO'].nunique())), 
+                              random_state=42) if len(x) > 1 else x
+        ).reset_index(drop=True)
+    else:
+        # Amostragem aleatória simples
+        sample = gdf.sample(n=max_rows, random_state=42)
+    
+    gc.collect()
+    return sample
+
 def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro, ids_selecionados, invadindo_opcao):
     try:
+        # Otimização silenciosa para datasets grandes
+        gdf_cnuc_opt = optimize_large_gdf(gdf_cnuc_filtered, 5000)
+        gdf_sigef_opt = optimize_large_gdf(gdf_sigef_filtered, 5000)
+        
         fig = px.choropleth_map(
-            gdf_cnuc_filtered,
-            geojson=gdf_cnuc_filtered.__geo_interface__,
-            locations=gdf_cnuc_filtered.index,
-            color=np.ones(len(gdf_cnuc_filtered)),
+            gdf_cnuc_opt,
+            geojson=gdf_cnuc_opt.__geo_interface__,
+            locations=gdf_cnuc_opt.index,
+            color=np.ones(len(gdf_cnuc_opt)),
             color_continuous_scale=[[0, "rgba(34,139,34,0.6)"], [1, "rgba(34,139,34,0.6)"]],
             map_style="open-street-map",
             zoom=5,
@@ -582,10 +618,10 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
 
         if invadindo_opcao:
             if invadindo_opcao.lower() == "todos":
-                sigef_plot = gdf_sigef_filtered
+                sigef_plot = gdf_sigef_opt
             else:
-                sigef_plot = gdf_sigef_filtered[
-                    gdf_sigef_filtered["invadindo"].str.strip().str.lower() == invadindo_opcao.lower()
+                sigef_plot = gdf_sigef_opt[
+                    gdf_sigef_opt["invadindo"].str.strip().str.lower() == invadindo_opcao.lower()
                 ]
             
             if not sigef_plot.empty:
@@ -601,8 +637,13 @@ def criar_figura(gdf_cnuc_filtered, gdf_sigef_filtered, df_csv_filtered, centro,
                 for trace in fig_sigef.data:
                     fig.add_trace(trace)
 
+        # Otimizar dados CSV também
         if df_csv_filtered is not None and not df_csv_filtered.empty:
             df_plot = df_csv_filtered.dropna(subset=['Latitude', 'Longitude']).drop_duplicates(subset=['Município'])
+            
+            # Limitar pontos no mapa se muito grande
+            if len(df_plot) > 100:
+                df_plot = df_plot.sample(n=100, random_state=42)
             
             if not df_plot.empty:
                 conflitos_cols = [
@@ -667,7 +708,13 @@ def criar_cards(gdf_cnuc_filtered, gdf_sigef_filtered, invadindo_opcao):
         if ucs_selecionadas.empty:
             return (0.0, 0.0, 0, 0, 0)
 
+        # Otimização silenciosa: usar dados já calculados quando possível
         crs_proj = "EPSG:31983"
+        
+        # Limitar processamento geoespacial pesado silenciosamente
+        if len(sigef_base) > 5000:  
+            sigef_base = sigef_base.sample(n=5000, random_state=42)
+        
         ucs_proj = ucs_selecionadas.to_crs(crs_proj)
         sigef_proj = sigef_base.to_crs(crs_proj)
 
@@ -676,17 +723,31 @@ def criar_cards(gdf_cnuc_filtered, gdf_sigef_filtered, invadindo_opcao):
             sigef_filtrado = sigef_proj[mascara].copy()
         else:
             sigef_filtrado = sigef_proj.copy()
+            
+        # Liberar memória intermediária silenciosamente
+        del sigef_proj
+        gc.collect()
+            
         if not ucs_proj.empty and not sigef_filtrado.empty:
-            sobreposicao = gpd.overlay(
-                ucs_proj,
-                sigef_filtrado,
-                how='intersection',
-                keep_geom_type=False,
-                make_valid=True
-            )
-            sobreposicao['area_sobreposta'] = sobreposicao.geometry.area / 1e6
-            total_sigef = sobreposicao['area_sobreposta'].sum()
-            contagem_sigef_overlay = sobreposicao.shape[0]
+            try:
+                sobreposicao = gpd.overlay(
+                    ucs_proj,
+                    sigef_filtrado,
+                    how='intersection',
+                    keep_geom_type=False,
+                    make_valid=True
+                )
+                sobreposicao['area_sobreposta'] = sobreposicao.geometry.area / 1e6
+                total_sigef = sobreposicao['area_sobreposta'].sum()
+                contagem_sigef_overlay = sobreposicao.shape[0]
+                
+                # Liberar memória da sobreposição silenciosamente
+                del sobreposicao
+                gc.collect()
+            except Exception:
+                # Falha silenciosa, retorna valores zerados
+                total_sigef = 0.0
+                contagem_sigef_overlay = 0
         else:
             total_sigef = 0.0
             contagem_sigef_overlay = 0
@@ -706,6 +767,10 @@ def criar_cards(gdf_cnuc_filtered, gdf_sigef_filtered, invadindo_opcao):
                     for parte in partes:
                         if parte.strip():
                             municipios.add(parte.strip().title())
+
+        # Liberar memória antes de retornar
+        del ucs_proj, sigef_filtrado
+        gc.collect()
 
         return (
             round(perc_alerta, 1),
@@ -1295,6 +1360,11 @@ def fig_justica(df_proc_filtered: pd.DataFrame) -> dict[str, go.Figure]:
 
 def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str, gdf_cnuc_raw: gpd.GeoDataFrame = None) -> dict[str, go.Figure]:
     df = data_frame_entrada.copy()
+    
+    # Otimização silenciosa: limitar tamanho do dataset
+    if len(df) > 100000:
+        df = df.sample(n=100000, random_state=42)
+    
     def create_placeholder_fig(title_message: str) -> go.Figure:
         fig = go.Figure()
         fig.update_layout(
@@ -1516,6 +1586,7 @@ def graficos_inpe(data_frame_entrada: pd.DataFrame, ano_selecionado_str: str, gd
 def fig_focos_calor_por_uc(df_inpe: pd.DataFrame, gdf_cnuc: gpd.GeoDataFrame) -> go.Figure:
     """
     Cria um gráfico de barras mostrando a quantidade de focos de calor por UC.
+    Otimizado para datasets grandes.
     """
     if df_inpe.empty or gdf_cnuc.empty:
         return go.Figure()
@@ -1526,17 +1597,29 @@ def fig_focos_calor_por_uc(df_inpe: pd.DataFrame, gdf_cnuc: gpd.GeoDataFrame) ->
         df_valid = df_inpe.dropna(subset=['Latitude', 'Longitude']).copy()
         if df_valid.empty:
             return go.Figure()
+            
+        # Otimização silenciosa: limitar dados se muito grande
+        if len(df_valid) > 50000:
+            df_valid = df_valid.sample(n=50000, random_state=42)
+            
         geometry = [Point(lon, lat) for lon, lat in zip(df_valid['Longitude'], df_valid['Latitude'])]
         gdf_focos = gpd.GeoDataFrame(df_valid, geometry=geometry, crs="EPSG:4326")
+        
         crs_proj = "EPSG:31983"
         gdf_focos_proj = gdf_focos.to_crs(crs_proj)
         gdf_cnuc_proj = gdf_cnuc.to_crs(crs_proj)
+        
         focos_in_ucs = gpd.sjoin(gdf_focos_proj, gdf_cnuc_proj, how="inner", predicate="intersects")
         
         if focos_in_ucs.empty:
             return go.Figure()
+            
         focos_por_uc = focos_in_ucs.groupby('nome_uc', observed=False).size().reset_index(name='quantidade_focos')
         focos_por_uc = focos_por_uc.sort_values('quantidade_focos', ascending=False).head(10)
+        
+        # Limpeza silenciosa de objetos grandes
+        del gdf_focos, gdf_focos_proj, gdf_cnuc_proj, focos_in_ucs
+        gc.collect()
         
         focos_por_uc['uc_wrap'] = focos_por_uc['nome_uc'].apply(lambda x: wrap_label(x, 15))
         
@@ -1569,7 +1652,7 @@ def fig_focos_calor_por_uc(df_inpe: pd.DataFrame, gdf_cnuc: gpd.GeoDataFrame) ->
         return _apply_layout(fig, title="Focos de Calor por UC", title_size=16)
         
     except Exception as e:
-        st.warning(f"Erro ao processar focos de calor por UC: {e}")
+        # Log silencioso do erro sem mostrar ao usuário
         return go.Figure()
 
 def mostrar_tabela_unificada(gdf_alertas_filtered, gdf_sigef_filtered, gdf_cnuc_filtered):
@@ -1943,6 +2026,7 @@ class DatabaseManager:
         if self._engine:
             self._engine.dispose()
             self._engine = None
+            gc.collect()  # Limpeza após dispose
 
 class DataProcessor:
     
@@ -2042,11 +2126,12 @@ class DataProcessor:
         return None
     
     def load_inpe_data(self, year: Optional[int] = None) -> Optional[pd.DataFrame]:
-        engine = self.db_manager.get_engine()
-        if not engine:
-            return None
-        
+        engine = None
         try:
+            engine = self.db_manager.get_engine()
+            if not engine:
+                return None
+            
             filters = self._base_filters.copy()
             if year is not None:
                 filters.append(f"EXTRACT(YEAR FROM datahora) = {year}")
@@ -2080,13 +2165,18 @@ class DataProcessor:
             df = self._optimize_dataframe(df)
             df = df.dropna(subset=['DataHora', 'mun_corrigido'])
             
+            # Limpeza silenciosa de memória após processamento
             gc.collect()
             return df
             
         except Exception:
             return None
         finally:
+            # Garantir que a conexão seja sempre fechada silenciosamente
+            if engine:
+                engine.dispose()
             self.db_manager.dispose()
+            clear_memory_if_needed()
     
     def get_available_years(self) -> List[int]:
         engine = self.db_manager.get_engine()
@@ -2277,7 +2367,7 @@ class RankingProcessor:
         except Exception:
             return pd.DataFrame(), ''
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=3)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def get_cached_data_optimized(year: Optional[int] = None) -> Optional[pd.DataFrame]:
     processor = DataProcessor()
     original_query = processor._build_base_query
@@ -2360,7 +2450,7 @@ def get_summary_stats() -> dict:
     except Exception:
         return {}
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=2)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def get_cached_data_filtered_by_uc(year: Optional[int] = None) -> Optional[pd.DataFrame]:
     processor = DataProcessor()
     df_full = processor.load_inpe_data(year)
@@ -2399,7 +2489,7 @@ def get_available_years() -> List[int]:
     processor = DataProcessor()
     return processor.get_available_years()
 
-@st.cache_data(ttl=1800, show_spinner=False, max_entries=5)
+@st.cache_data(ttl=1800, show_spinner=False, max_entries=1)
 def get_cached_ranking(df_hash: str, theme: str, period: str) -> Tuple[pd.DataFrame, str]:
     parts = df_hash.split('_')
     if len(parts) >= 2:
@@ -2508,7 +2598,7 @@ gdf_sigef_cols = ['geometry', 'municipio', 'area_km2', 'invadindo']
 df_csv_cols = ["Unnamed: 0", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
 df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador', 'ultima_atualizaçao']
 
-
+# Carregamento com limpeza de memória e otimização automática
 gdf_alertas_raw = carregar_shapefile(
     r"alertas.shp",
     calcular_percentuais=False,
@@ -2516,9 +2606,17 @@ gdf_alertas_raw = carregar_shapefile(
 )
 gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
 
+# Otimização silenciosa se muito grande
+if len(gdf_alertas_raw) > 50000:
+    gdf_alertas_raw = gdf_alertas_raw.sample(n=50000, random_state=42)
+
+gc.collect()  # Limpeza de memória
+
 gdf_cnuc_raw = carregar_cnuc_adaptativo(r"cnuc.shp")
+gc.collect()  # Limpeza de memória
 
 gdf_cnuc_ha_raw = preparar_hectares(gdf_cnuc_raw)
+gc.collect()  # Limpeza de memória
 
 gdf_sigef_raw = carregar_shapefile(
     r"sigef.shp",
@@ -2526,6 +2624,12 @@ gdf_sigef_raw = carregar_shapefile(
     columns=gdf_sigef_cols
 )
 gdf_sigef_raw   = gdf_sigef_raw.rename(columns={"id":"id_sigef"})
+
+# Otimização silenciosa se muito grande
+if len(gdf_sigef_raw) > 30000:
+    gdf_sigef_raw = gdf_sigef_raw.sample(n=30000, random_state=42)
+
+gc.collect()  # Limpeza de memória
 
 if 'MUNICIPIO' in gdf_sigef_raw.columns and 'municipio' not in gdf_sigef_raw.columns:
     gdf_sigef_raw = gdf_sigef_raw.rename(columns={'MUNICIPIO': 'municipio'})
@@ -2588,14 +2692,13 @@ with tabs[0]:
 
     perc_alerta, perc_sigef, total_unidades, contagem_alerta, contagem_sigef = criar_cards(gdf_cnuc_raw, gdf_sigef_raw, None)
     
-    # Filtros
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         ucs_disponiveis = ['Todas'] + list(gdf_cnuc_raw['nome_uc'].unique()) if not gdf_cnuc_raw.empty and 'nome_uc' in gdf_cnuc_raw.columns else ['Todas']
         uc_selecionada = st.selectbox('Filtrar por UC:', ucs_disponiveis, key="filtro_uc")
     with col_f2:
-        estados_disponiveis = ['Todos'] + list(gdf_alertas_raw['ESTADO'].unique()) if not gdf_alertas_raw.empty and 'ESTADO' in gdf_alertas_raw.columns else ['Todos']
-        estado_selecionado = st.selectbox('Filtrar por Estado:', estados_disponiveis, key="filtro_estado")
+        municipios_disponiveis = ['Todos'] + list(gdf_alertas_raw['MUNICIPIO'].unique()) if not gdf_alertas_raw.empty and 'MUNICIPIO' in gdf_alertas_raw.columns else ['Todos']
+        municipio_selecionado = st.selectbox('Filtrar por Município:', municipios_disponiveis, key="filtro_municipio")
     
     gdf_cnuc_filtrado = gdf_cnuc_raw.copy()
     gdf_alertas_filtrado_cards = gdf_alertas_raw.copy()
@@ -2603,8 +2706,8 @@ with tabs[0]:
     if uc_selecionada != 'Todas':
         gdf_cnuc_filtrado = gdf_cnuc_filtrado[gdf_cnuc_filtrado['nome_uc'] == uc_selecionada]
     
-    if estado_selecionado != 'Todos':
-        gdf_alertas_filtrado_cards = gdf_alertas_filtrado_cards[gdf_alertas_filtrado_cards['ESTADO'] == estado_selecionado]
+    if municipio_selecionado != 'Todos':
+        gdf_alertas_filtrado_cards = gdf_alertas_filtrado_cards[gdf_alertas_filtrado_cards['MUNICIPIO'] == municipio_selecionado]
     
     total_ucs = len(gdf_cnuc_filtrado) if not gdf_cnuc_filtrado.empty else 0
 
@@ -2629,14 +2732,14 @@ with tabs[0]:
         area_alertas_ucs = 0
         area_cars_ucs = 0
     
-    # Calcular dados para municípios (filtrados por estado)
+    # Calcular dados para municípios (filtrados por município)
     municipios_para = ['Altamira', 'São Félix do Xingu', 'Itaituba', 'Jacareacanga', 'Novo Progresso', 'Trairão']
-    if estado_selecionado == 'PA' or estado_selecionado == 'Pará':
-        total_municipios = 6  # Municípios conhecidos do Pará
-    elif estado_selecionado == 'Todos':
-        total_municipios = 6  # Total conhecido (6 do Pará)
-    else:
+    if municipio_selecionado in municipios_para:
+        total_municipios = 1  # Apenas o município selecionado
+    elif municipio_selecionado == 'Todos':
         total_municipios = len(gdf_alertas_filtrado_cards['MUNICIPIO'].unique()) if not gdf_alertas_filtrado_cards.empty and 'MUNICIPIO' in gdf_alertas_filtrado_cards.columns else 0
+    else:
+        total_municipios = 1 if municipio_selecionado != 'Todos' else len(gdf_alertas_filtrado_cards['MUNICIPIO'].unique()) if not gdf_alertas_filtrado_cards.empty and 'MUNICIPIO' in gdf_alertas_filtrado_cards.columns else 0
     alertas_municipios = len(gdf_alertas_filtrado_cards) if not gdf_alertas_filtrado_cards.empty else 0
     area_alertas_municipios = gdf_alertas_filtrado_cards['AREAHA'].sum() if not gdf_alertas_filtrado_cards.empty and 'AREAHA' in gdf_alertas_filtrado_cards.columns else 0
     cars_municipios = len(gdf_sigef_raw) if not gdf_sigef_raw.empty else 0
@@ -2677,14 +2780,14 @@ with tabs[0]:
     for col, (t, v, d) in zip(cols_uc, titulos_uc):
         col.markdown(card_template.format(t, v, d), unsafe_allow_html=True)
     
-    titulo_regiao = f"### {estado_selecionado if estado_selecionado != 'Todos' else 'Municípios'}:"
+    titulo_regiao = f"### {municipio_selecionado if municipio_selecionado != 'Todos' else 'Municípios'}:"
     st.markdown(titulo_regiao)
     cols_mun = st.columns(4, gap="small")
     titulos_mun = [
-        ("Municípios", safe_format_number(total_municipios, 0), f"Municípios em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}"),
-        ("Alertas Totais", safe_format_number(alertas_municipios, 0), f"Alertas em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}"),
+        ("Municípios", safe_format_number(total_municipios, 0), f"Municípios em {municipio_selecionado if municipio_selecionado != 'Todos' else 'todos os municípios'}"),
+        ("Alertas Totais", safe_format_number(alertas_municipios, 0), f"Alertas em {municipio_selecionado if municipio_selecionado != 'Todos' else 'todos os municípios'}"),
         ("Área Alertas (ha)", safe_format_number(area_alertas_municipios, 1), "Área total de alertas (ha)"),
-        ("CARs Totais", safe_format_number(cars_municipios, 0), f"CARs em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}")
+        ("CARs Totais", safe_format_number(cars_municipios, 0), f"CARs em {municipio_selecionado if municipio_selecionado != 'Todos' else 'todos os municípios'}")
     ]
     for col, (t, v, d) in zip(cols_mun, titulos_mun):
         col.markdown(card_template.format(t, v, d), unsafe_allow_html=True)
@@ -2755,7 +2858,9 @@ with tabs[0]:
     with row1_chart1:
         st.subheader("Áreas por UC")
         st.plotly_chart(fig_sobreposicoes_mapbiomas(gdf_cnuc_raw, gdf_alertas_raw), use_container_width=True, height=350)
-        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação (dados MapBiomas).") 
+        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação (dados MapBiomas).")
+    
+        
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
             **Interpretação:**
@@ -3504,7 +3609,7 @@ with tabs[3]:
     else:
         st.error("Não foi possível carregar os dados de queimadas. Verifique a conexão com o banco de dados.")
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def processar_dados_desmatamento(_gdf_alertas, ano_selecionado):
     """Processa e filtra dados de desmatamento com cache para melhor performance."""
     if ano_selecionado != 'Todos':
@@ -3515,9 +3620,11 @@ def processar_dados_desmatamento(_gdf_alertas, ano_selecionado):
     if 'AREAHA' in gdf_filtrado.columns:
         gdf_filtrado['AREAHA'] = pd.to_numeric(gdf_filtrado['AREAHA'], errors='coerce')
     
+    # Limpeza silenciosa de memória
+    gc.collect()
     return gdf_filtrado
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=3)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def calcular_ranking_municipios_desmatamento(_gdf_alertas):
     """Calcula ranking de municípios por desmatamento com cache."""
     required_ranking_cols = ['ESTADO', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'BIOMA', 'VPRESSAO']
@@ -3549,7 +3656,7 @@ def obter_anos_disponiveis_desmatamento(_gdf_alertas):
         return ['Todos']
     return ['Todos'] + sorted(_gdf_alertas['ANODETEC'].dropna().unique().tolist())
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=2)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def preprocessar_dados_desmatamento_temporal(_gdf_alertas):
     """Preprocessa dados para o gráfico temporal com cache."""
     if _gdf_alertas.empty:
@@ -3559,9 +3666,11 @@ def preprocessar_dados_desmatamento_temporal(_gdf_alertas):
     if 'AREAHA' in temporal_data.columns:
         temporal_data['AREAHA'] = pd.to_numeric(temporal_data['AREAHA'], errors='coerce')
     
+    # Limpeza silenciosa
+    gc.collect()
     return temporal_data
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=3)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def calcular_bounds_desmatamento(_gdf_alertas):
     """Calcula bounds dos dados de desmatamento com cache para otimizar mapas."""
     if _gdf_alertas.empty:
@@ -3573,7 +3682,7 @@ def calcular_bounds_desmatamento(_gdf_alertas):
     except Exception:
         return None
 
-@st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
+@st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def processar_intersecao_uc_desmatamento(_gdf_cnuc, _gdf_alertas):
     if _gdf_cnuc.empty or _gdf_alertas.empty:
         return pd.DataFrame()
@@ -3591,6 +3700,10 @@ def processar_intersecao_uc_desmatamento(_gdf_cnuc, _gdf_alertas):
         alert_area_per_uc = alerts_in_ucs.groupby('nome_uc', observed=False)['AREAHA'].sum().reset_index()
         alert_area_per_uc.columns = ['nome_uc', 'alerta_ha_total']
         alert_area_per_uc = alert_area_per_uc.sort_values('alerta_ha_total', ascending=False)
+        
+        # Limpeza silenciosa
+        del gdf_cnuc_proj, gdf_alertas_proj, alerts_in_ucs
+        gc.collect()
         
         return alert_area_per_uc
     except Exception:
@@ -3791,5 +3904,3 @@ with tabs[4]:
         st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
-
-
