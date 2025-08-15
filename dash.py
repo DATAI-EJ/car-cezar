@@ -2681,10 +2681,10 @@ with tabs[0]:
     st.markdown(titulo_regiao)
     cols_mun = st.columns(4, gap="small")
     titulos_mun = [
-        ("Municípios", safe_format_number(total_municipios, 0), f"Municípios em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
-        ("Alertas Totais", safe_format_number(alertas_municipios, 0), f"Alertas em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}"),
+        ("Municípios", safe_format_number(total_municipios, 0), f"Municípios em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}"),
+        ("Alertas Totais", safe_format_number(alertas_municipios, 0), f"Alertas em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}"),
         ("Área Alertas (ha)", safe_format_number(area_alertas_municipios, 1), "Área total de alertas (ha)"),
-        ("CARs Totais", safe_format_number(cars_municipios, 0), f"CARs em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os estados'}")
+        ("CARs Totais", safe_format_number(cars_municipios, 0), f"CARs em {estado_selecionado if estado_selecionado != 'Todos' else 'todos os municípios'}")
     ]
     for col, (t, v, d) in zip(cols_mun, titulos_mun):
         col.markdown(card_template.format(t, v, d), unsafe_allow_html=True)
@@ -3791,4 +3791,5 @@ with tabs[4]:
         st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
+
 
