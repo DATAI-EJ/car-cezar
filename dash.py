@@ -14,26 +14,19 @@ import psutil
 from io import BytesIO
 
 def safe_format_number(value, decimals=1):
-    """
-    Função segura para formatação de números nos cards
-    """
     try:
         if pd.isna(value) or value is None:
             return "0"
         
-        # Converter para float se necessário
         num_value = float(value)
         
-        # Se for zero ou muito pequeno
         if abs(num_value) < 0.001:
             return "0"
         
-        # Formatação brasileira
         if decimals == 0:
             return f"{num_value:,.0f}".replace(',', '.')
         else:
             formatted = f"{num_value:,.{decimals}f}"
-            # Trocar . e , para formato brasileiro
             if '.' in formatted:
                 parts = formatted.split('.')
                 integer_part = parts[0].replace(',', '.')
@@ -46,9 +39,6 @@ def safe_format_number(value, decimals=1):
         return "Erro"
 
 def format_number_with_dots(number, decimal_places=1):
-    """
-    Formata número com separador brasileiro (ponto para milhares, vírgula para decimais)
-    """
     if pd.isna(number) or number is None:
         return "0"
     
@@ -251,7 +241,6 @@ PASTEL_SEQ = px.colors.qualitative.Pastel + px.colors.qualitative.Pastel1 + px.c
 
 _original_px_bar = px.bar
 
-# Logo centralizada acima do título
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     try:
@@ -287,16 +276,74 @@ def _patched_px_bar(*args, **kwargs) -> go.Figure:
 px.bar = _patched_px_bar
 
 @st.cache_data
-def carregar_shapefile_cloud_safe(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
-    """
-    Versão mais robusta para carregamento de shapefiles no cloud
-    """
+def carregar_cnuc_adaptativo(caminho: str) -> gpd.GeoDataFrame:
+    try:
+        if not os.path.exists(caminho):
+            st.error(f"❌ Arquivo não encontrado: {caminho}")
+            return gpd.GeoDataFrame()
+        gdf = gpd.read_file(caminho)
+        
+        if gdf.empty:
+            st.warning(f" Shapefile {caminho} está vazio")
+            return gpd.GeoDataFrame()
+
+        colunas_essenciais = ['geometry', 'nome_uc', 'municipio']
+        colunas_opcionais = ['alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef']
+
+        for col in colunas_essenciais:
+            if col not in gdf.columns:
+                st.error(f"❌ Coluna essencial '{col}' não encontrada em {caminho}")
+                return gpd.GeoDataFrame()
+        
+        for col in colunas_opcionais:
+            if col not in gdf.columns:
+                gdf[col] = 0
+                st.info(f"➕ Coluna '{col}' adicionada com valor 0")
+        if 'area_km2' in gdf.columns:
+            gdf['ha_total'] = gdf['area_km2'] * 100
+        else:
+            gdf['ha_total'] = 0
+            st.warning(" Coluna 'area_km2' não encontrada, ha_total definido como 0")
+        
+        return gdf
+        
+    except Exception as e:
+        st.error(f"❌ Erro ao carregar {caminho}: {str(e)}")
+        return gpd.GeoDataFrame()
     try:
         if not os.path.exists(caminho):
             st.error(f"❌ Arquivo não encontrado: {caminho}")
             return gpd.GeoDataFrame()
         
-        # Tentar carregar o shapefile
+        gdf = gpd.read_file(caminho)
+        
+        if gdf.empty:
+            st.warning(f"⚠️ Shapefile {caminho} está vazio")
+            return gpd.GeoDataFrame()
+        
+        if columns:
+            available_cols = [col for col in columns if col in gdf.columns]
+            missing_cols = [col for col in columns if col not in gdf.columns]
+            
+            if missing_cols:
+                st.warning(f" Colunas não encontradas em {caminho}: {missing_cols}")
+                
+            if available_cols:
+                gdf = gdf[available_cols]
+        
+        return gdf
+        
+    except Exception as e:
+        st.error(f" Erro ao carregar {caminho}: {str(e)}")
+        return gpd.GeoDataFrame()
+
+@st.cache_data
+def carregar_shapefile_cloud_safe(caminho: str, calcular_percentuais: bool = True, columns: list[str] = None) -> gpd.GeoDataFrame:
+    try:
+        if not os.path.exists(caminho):
+            st.error(f"❌ Arquivo não encontrado: {caminho}")
+            return gpd.GeoDataFrame()
+        
         gdf = gpd.read_file(caminho)
         
         if gdf.empty:
@@ -808,6 +855,94 @@ def fig_sobreposicoes(gdf_cnuc_ha_filtered):
     )
     
     return _apply_layout(fig, title="Áreas por UC", title_size=16)
+
+def fig_sobreposicoes_mapbiomas(gdf_cnuc_raw, gdf_alertas_raw):
+    """
+    Versão atualizada que usa dados do MapBiomas para alertas, garantindo consistência
+    """
+    if gdf_cnuc_raw.empty:
+        return go.Figure()
+    
+    # Calcular dados de alertas usando MapBiomas (mesma metodologia da aba Desmatamento)
+    try:
+        crs_proj = "EPSG:31983"
+        gdf_cnuc_proj = gdf_cnuc_raw.to_crs(crs_proj)
+        gdf_alertas_proj = gdf_alertas_raw.to_crs(crs_proj)
+        
+        # Análise espacial para alertas
+        alerts_in_ucs = gpd.sjoin(gdf_alertas_proj, gdf_cnuc_proj, how="inner", predicate="intersects")
+        
+        if not alerts_in_ucs.empty:
+            alert_area_per_uc = alerts_in_ucs.groupby('nome_uc', observed=False)['AREAHA'].sum().reset_index()
+            alert_area_per_uc.columns = ['nome_uc', 'alerta_mapbiomas_ha']
+        else:
+            alert_area_per_uc = pd.DataFrame(columns=['nome_uc', 'alerta_mapbiomas_ha'])
+        
+        # Preparar dados das UCs
+        gdf_display = gdf_cnuc_raw.copy()
+        gdf_display['area_ha'] = gdf_display.get('ha_total', 0)
+        gdf_display['sigef_ha'] = gdf_display.get('sigef_km2', 0) * 100
+        
+        # Merge com dados do MapBiomas
+        gdf_display = gdf_display.merge(alert_area_per_uc, on='nome_uc', how='left')
+        gdf_display['alerta_mapbiomas_ha'] = gdf_display['alerta_mapbiomas_ha'].fillna(0)
+        
+        # Ordenar por área da UC
+        gdf_display = gdf_display.sort_values("area_ha", ascending=False)
+        gdf_display["uc_short"] = gdf_display["nome_uc"].apply(lambda x: wrap_label(x, 15))
+        
+        # Criar gráfico
+        fig = go.Figure()
+        
+        alerta_text = [format_number_with_dots(val, 0) for val in gdf_display["alerta_mapbiomas_ha"]]
+        sigef_text = [format_number_with_dots(val, 0) for val in gdf_display["sigef_ha"]]
+        area_text = [format_number_with_dots(val, 0) for val in gdf_display["area_ha"]]
+        
+        fig.add_trace(go.Bar(
+            name='Alertas',
+            x=gdf_display["uc_short"],
+            y=gdf_display["alerta_mapbiomas_ha"],
+            marker_color='#99CD85',
+            text=alerta_text,
+            textposition='inside',
+            hovertemplate='<b>%{x}</b><br>Alertas: %{text} ha<extra></extra>',
+            customdata=alerta_text
+        ))
+        
+        fig.add_trace(go.Bar(
+            name='CARs',
+            x=gdf_display["uc_short"],
+            y=gdf_display["sigef_ha"],
+            marker_color='#CFE0BC',
+            text=sigef_text,
+            textposition='inside',
+            hovertemplate='<b>%{x}</b><br>CARs: %{text} ha<extra></extra>',
+            customdata=sigef_text
+        ))
+        
+        fig.add_trace(go.Bar(
+            name='UCs',
+            x=gdf_display["uc_short"],
+            y=gdf_display["area_ha"],
+            marker_color='#7FA653',
+            text=area_text,
+            textposition='inside',
+            hovertemplate='<b>%{x}</b><br>UCs: %{text} ha<extra></extra>',
+            customdata=area_text
+        ))
+        
+        fig.update_layout(
+            barmode='stack',
+            height=400,
+            xaxis=dict(tickangle=0, tickfont=dict(size=9), title_text=""),
+            yaxis=dict(title_text="Área (ha)", tickfont=dict(size=9), tickformat='~s')
+        )
+        
+        return _apply_layout(fig, title="Áreas por UC (Dados MapBiomas)", title_size=16)
+        
+    except Exception as e:
+        # Fallback para função original se houver erro
+        return fig_sobreposicoes(gdf_cnuc_raw)
 
 def fig_contagens_uc(gdf_cnuc_filtered: gpd.GeoDataFrame) -> go.Figure:
     gdf = gdf_cnuc_filtered.copy()
@@ -2367,7 +2502,8 @@ def render_interface():
 import os
 files_to_check = ["cnuc.shp", "alertas.shp", "sigef.shp"]
 gdf_alertas_cols = ['geometry', 'MUNICIPIO', 'AREAHA', 'ANODETEC', 'DATADETEC', 'CODEALERTA', 'ESTADO', 'BIOMA', 'VPRESSAO']
-gdf_cnuc_cols = ['geometry', 'nome_uc', 'municipio', 'alerta_km2', 'sigef_km2', 'area_km2', 'c_alertas', 'c_sigef'] 
+# Colunas essenciais - outras serão verificadas dinamicamente
+gdf_cnuc_cols_base = ['geometry', 'nome_uc', 'municipio'] 
 gdf_sigef_cols = ['geometry', 'municipio', 'area_km2', 'invadindo']
 df_csv_cols = ["Unnamed: 0", "Áreas de conflitos", "Assassinatos", "Conflitos por Terra", "Ocupações Retomadas", "Tentativas de Assassinatos", "Trabalho Escravo", "Latitude", "Longitude"]
 df_proc_cols = ['numero_processo', 'data_ajuizamento', 'municipio', 'classe', 'assuntos', 'orgao_julgador', 'ultima_atualizaçao']
@@ -2380,19 +2516,7 @@ gdf_alertas_raw = carregar_shapefile(
 )
 gdf_alertas_raw = gdf_alertas_raw.rename(columns={"id":"id_alerta"})
 
-gdf_cnuc_raw = carregar_shapefile_cloud_safe(
-    r"cnuc.shp",
-    columns=gdf_cnuc_cols
-)
-
-# Debug inicial - comentar após correção
-# st.write(f"🔍 Debug Inicial: GDF CNUC carregado - {len(gdf_cnuc_raw)} registros")
-# if not gdf_cnuc_raw.empty:
-#     st.write(f"🔍 Debug Inicial: Colunas CNUC: {list(gdf_cnuc_raw.columns)}")
-
-if 'ha_total' not in gdf_cnuc_raw.columns:
-    gdf_cnuc_raw['ha_total'] = gdf_cnuc_raw.get('area_km2', 0) * 100
-    gdf_cnuc_raw['ha_total'] = pd.to_numeric(gdf_cnuc_raw['ha_total'], downcast='float', errors='coerce')
+gdf_cnuc_raw = carregar_cnuc_adaptativo(r"cnuc.shp")
 
 gdf_cnuc_ha_raw = preparar_hectares(gdf_cnuc_raw)
 
@@ -2630,8 +2754,17 @@ with tabs[0]:
 
     with row1_chart1:
         st.subheader("Áreas por UC")
-        st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha_raw), use_container_width=True, height=350)
-        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação.")
+        st.plotly_chart(fig_sobreposicoes_mapbiomas(gdf_cnuc_raw, gdf_alertas_raw), use_container_width=True, height=350)
+        st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação (dados MapBiomas).")
+        
+        # Nota sobre padronização metodológica
+        st.success("""
+        ✅ **Dados unificados:**
+        
+        Esta visualização agora utiliza os mesmos dados do MapBiomas Alerta da aba "Desmatamento", 
+        garantindo consistência entre as análises.
+        """)
+        
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
             **Interpretação:**
@@ -3170,7 +3303,6 @@ with tabs[2]:
         unsafe_allow_html=True
     )
     
-    # Dados Completos
     st.divider()
     st.markdown("### 📊 Dados Completos")
     st.markdown("**Dados brutos dos processos judiciais:**")
@@ -3191,13 +3323,110 @@ with tabs[3]:
         st.write("- Precipitação acumulada")
         st.write("- Distribuição espacial")
         st.write("- Análise por Unidades de Conservação")
+        
+        st.markdown("---")
+        st.markdown("**Sobre o Risco de Fogo:** O valor do Risco de Fogo varia de 0.0 a 1.0 e é classificado como:")
+        st.write("- **Mínimo:** abaixo de 0,15")
+        st.write("- **Baixo:** de 0,15 a 0,4")
+        st.write("- **Médio:** de 0,4 a 0,7")
+        st.write("- **Alto:** de 0,7 a 0,95")
+        st.write("- **Crítico:** acima de 0,95")
+        
         st.markdown(
-            "**Fonte Geral da Seção:** INPE – Programa Queimadas, 2025.",
+            "**Fonte:** BD Queimadas - INPE, 2025.",
             unsafe_allow_html=True
         )
 
+    st.subheader("Focos de Calor em Unidades de Conservação")
+    
     YEAR_OPTIONS, DF_BASE = initialize_data()
     
+    if DF_BASE is not None and not DF_BASE.empty and not gdf_cnuc_raw.empty:
+
+        try:
+            from shapely.geometry import Point
+            df_valid = DF_BASE.dropna(subset=['Latitude', 'Longitude']).copy()
+            if not df_valid.empty:
+                geometry = [Point(lon, lat) for lon, lat in zip(df_valid['Longitude'], df_valid['Latitude'])]
+                gdf_focos = gpd.GeoDataFrame(df_valid, geometry=geometry, crs="EPSG:4326")
+                crs_proj = "EPSG:31983"
+                gdf_focos_proj = gdf_focos.to_crs(crs_proj)
+                gdf_cnuc_proj = gdf_cnuc_raw.to_crs(crs_proj)
+                focos_in_ucs = gpd.sjoin(gdf_focos_proj, gdf_cnuc_proj, how="inner", predicate="intersects")
+                
+                total_focos_geral = len(DF_BASE)
+                focos_em_ucs = len(focos_in_ucs) if not focos_in_ucs.empty else 0
+                percentual_ucs = (focos_em_ucs / total_focos_geral * 100) if total_focos_geral > 0 else 0
+                
+                col1, col2, col3 = st.columns(3, gap="medium")
+                
+                card_template = """
+                <div style="
+                    background-color:#F9F9FF;
+                    border:1px solid #E0E0E0;
+                    padding:1.5rem;
+                    border-radius:8px;
+                    box-shadow:0 2px 4px rgba(0,0,0,0.1);
+                    text-align:center;
+                    height:120px;
+                    display:flex;
+                    flex-direction:column;
+                    justify-content:center;">
+                    <h4 style="margin:0; font-size:1rem; color:#2F5496;">{titulo}</h4>
+                    <p style="margin:0.5rem 0 0 0; font-size:1.8rem; font-weight:bold; color:#2F5496;">{valor}</p>
+                    <small style="color:#666; margin:0;">{descricao}</small>
+                </div>
+                """
+                
+                with col1:
+                    st.markdown(
+                        card_template.format(
+                            titulo="Focos em UCs",
+                            valor=format_number_with_dots(focos_em_ucs, 0),
+                            descricao="Total de focos detectados em UCs"
+                        ),
+                        unsafe_allow_html=True
+                    )
+                
+                with col2:
+                    st.markdown(
+                        card_template.format(
+                            titulo="Total de Focos",
+                            valor=format_number_with_dots(total_focos_geral, 0),
+                            descricao="Total geral de focos detectados"
+                        ),
+                        unsafe_allow_html=True
+                    )
+                
+                with col3:
+                    st.markdown(
+                        card_template.format(
+                            titulo="% em UCs",
+                            valor=f"{percentual_ucs:.1f}%".replace('.', ','),
+                            descricao="Percentual de focos em UCs"
+                        ),
+                        unsafe_allow_html=True
+                    )
+                
+                if not focos_in_ucs.empty:
+                    st.markdown("**Ranking de UCs com mais focos de calor:**")
+                    focos_por_uc = focos_in_ucs.groupby('nome_uc', observed=False).size().reset_index(name='quantidade_focos')
+                    focos_por_uc = focos_por_uc.sort_values('quantidade_focos', ascending=False).head(10)
+                    ranking_display = focos_por_uc.copy()
+                    ranking_display.index = range(1, len(ranking_display) + 1)
+                    ranking_display.columns = ['Unidade de Conservação', 'Quantidade de Focos']
+                    st.dataframe(ranking_display, use_container_width=True)
+                else:
+                    st.info("Nenhum foco de calor detectado dentro das Unidades de Conservação.")
+            else:
+                st.warning("Dados de coordenadas não disponíveis para análise espacial.")
+        except Exception as e:
+            st.warning(f"Erro ao processar focos de calor em UCs: {e}")
+    else:
+        st.info("Dados não disponíveis para análise de focos em UCs.")
+    
+    st.divider()
+
     if DF_BASE is not None and not DF_BASE.empty:
         ano_sel_graf = st.selectbox(
             'Período para gráficos:',
@@ -3273,7 +3502,6 @@ with tabs[3]:
         else:
             st.info("Sem dados válidos para este ranking.")
             
-        # Dados Completos
         st.divider()
         st.markdown("### 📊 Dados Completos")
         st.markdown("**Dados brutos de focos de calor:**")
@@ -3285,7 +3513,6 @@ with tabs[3]:
     else:
         st.error("Não foi possível carregar os dados de queimadas. Verifique a conexão com o banco de dados.")
 
-# Funções de cache para otimizar a seção de desmatamento
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
 def processar_dados_desmatamento(_gdf_alertas, ano_selecionado):
     """Processa e filtra dados de desmatamento com cache para melhor performance."""
@@ -3294,7 +3521,6 @@ def processar_dados_desmatamento(_gdf_alertas, ano_selecionado):
     else:
         gdf_filtrado = _gdf_alertas.copy()
     
-    # Converter AREAHA para numérico se necessário
     if 'AREAHA' in gdf_filtrado.columns:
         gdf_filtrado['AREAHA'] = pd.to_numeric(gdf_filtrado['AREAHA'], errors='coerce')
     
@@ -3338,7 +3564,6 @@ def preprocessar_dados_desmatamento_temporal(_gdf_alertas):
     if _gdf_alertas.empty:
         return pd.DataFrame()
     
-    # Preparar dados para o gráfico temporal
     temporal_data = _gdf_alertas.copy()
     if 'AREAHA' in temporal_data.columns:
         temporal_data['AREAHA'] = pd.to_numeric(temporal_data['AREAHA'], errors='coerce')
@@ -3359,7 +3584,6 @@ def calcular_bounds_desmatamento(_gdf_alertas):
 
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=5)
 def processar_intersecao_uc_desmatamento(_gdf_cnuc, _gdf_alertas):
-    """Processa interseção entre UCs e alertas de desmatamento com cache."""
     if _gdf_cnuc.empty or _gdf_alertas.empty:
         return pd.DataFrame()
     
@@ -3402,8 +3626,6 @@ with tabs[4]:
     st.write("**Filtro Global:**")
     anos_disponiveis = obter_anos_disponiveis_desmatamento(gdf_alertas_raw)
     ano_global_selecionado = st.selectbox('Ano de Detecção:', anos_disponiveis, key="filtro_ano_global")
-
-    # Usar função com cache para processar dados
     gdf_alertas_filtrado = processar_dados_desmatamento(gdf_alertas_raw, ano_global_selecionado)
 
     st.divider()
@@ -3412,7 +3634,6 @@ with tabs[4]:
 
     with col_charts:
         if not gdf_cnuc_raw.empty and not gdf_alertas_filtrado.empty:
-            # Usar função com cache para calcular interseção UC-desmatamento
             dados_uc_desmatamento = processar_intersecao_uc_desmatamento(gdf_cnuc_raw, gdf_alertas_filtrado)
             
             if not dados_uc_desmatamento.empty:
@@ -3426,7 +3647,6 @@ with tabs[4]:
                     text_auto=True,
                 )
                 
-                # Formatar valores para exibição
                 alerta_text = [format_number_with_dots(val, 0) for val in dados_uc_desmatamento['alerta_ha_total']]
                 
                 fig_desmat_uc.update_traces(
@@ -3447,6 +3667,7 @@ with tabs[4]:
                 st.subheader("Área de Alertas por UC")
                 st.plotly_chart(fig_desmat_uc, use_container_width=True, height=400, key="desmat_uc_chart")
                 st.caption("Figura 6.1: Área total de alertas de desmatamento por unidade de conservação.")
+                
                 with st.expander("Detalhes e Fonte da Figura 6.1"):
                     st.write("""
                     **Interpretação:**
