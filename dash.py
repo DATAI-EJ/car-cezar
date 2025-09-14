@@ -2572,8 +2572,6 @@ with tabs[1]:
             "**Fonte Geral da Seção:** CPT - Comissão Pastoral da Terra. Conflitos no Campo Brasil. Goiânia: CPT Nacional.",
             unsafe_allow_html=True
         )
-        
-        st.info("💡 **Para desenvolvedores:** Para debug dos dados CPT, execute: `streamlit run debug_cpt.py`")
 
     with st.spinner("Carregando dados CPT do PostgreSQL..."):
         try:
@@ -3960,3 +3958,4 @@ with tabs[4]:
         st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
+
