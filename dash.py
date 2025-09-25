@@ -622,10 +622,96 @@ def get_year_data(year_option: str, base_df: pd.DataFrame) -> pd.DataFrame:
             return pd.DataFrame()
 
 def clean_text(text):
-    """Limpa e padroniza texto."""
     if pd.isna(text):
         return ""
     return str(text).strip().title()
+
+def clean_state_data(estado_value):
+    if pd.isna(estado_value):
+        return None
+    
+    estado_str = str(estado_value).strip().upper()
+    
+    if estado_str in ['UF', 'NAN', 'NONE', 'NULL', '']:
+        return None
+    
+    if estado_str.isdigit():
+        return None
+    
+    if any(char.isdigit() for char in estado_str):
+        return None
+    
+    if not all(char.isalpha() or char.isspace() for char in estado_str):
+        return None
+    
+    if len(estado_str.replace(' ', '')) < 2:
+        return None
+    
+    siglas_para_estados = {
+        'AC': 'Acre',
+        'AL': 'Alagoas', 
+        'AP': 'Amapá',
+        'AM': 'Amazonas',
+        'BA': 'Bahia',
+        'CE': 'Ceará',
+        'DF': 'Distrito Federal',
+        'ES': 'Espírito Santo',
+        'GO': 'Goiás',
+        'MA': 'Maranhão',
+        'MT': 'Mato Grosso',
+        'MS': 'Mato Grosso do Sul',
+        'MG': 'Minas Gerais',
+        'PA': 'Pará',
+        'PB': 'Paraíba',
+        'PR': 'Paraná',
+        'PE': 'Pernambuco',
+        'PI': 'Piauí',
+        'RJ': 'Rio de Janeiro',
+        'RN': 'Rio Grande do Norte',
+        'RS': 'Rio Grande do Sul',
+        'RO': 'Rondônia',
+        'RR': 'Roraima',
+        'SC': 'Santa Catarina',
+        'SP': 'São Paulo',
+        'SE': 'Sergipe',
+        'TO': 'Tocantins'
+    }
+    
+    # Se é uma sigla válida, converter para nome completo
+    if estado_str in siglas_para_estados:
+        return siglas_para_estados[estado_str]
+    
+    # Se já é um nome de estado, padronizar capitalização
+    nomes_estados = list(siglas_para_estados.values())
+    estado_title = estado_str.title()
+    
+    # Correções específicas de grafia
+    correcoes = {
+        'Para': 'Pará',
+        'Ceara': 'Ceará',
+        'Espirito Santo': 'Espírito Santo',
+        'Goias': 'Goiás',
+        'Maranhao': 'Maranhão',
+        'Paraiba': 'Paraíba',
+        'Parana': 'Paraná',
+        'Piaui': 'Piauí',
+        'Rondonia': 'Rondônia',
+        'Sao Paulo': 'São Paulo'
+    }
+    
+    if estado_title in correcoes:
+        return correcoes[estado_title]
+    
+    # Verificar se é um nome válido (mesmo com pequenas variações)
+    for nome_valido in nomes_estados:
+        if estado_title == nome_valido or estado_title.replace(' ', '') == nome_valido.replace(' ', ''):
+            return nome_valido
+    
+    # Se chegou até aqui e tem mais de 2 caracteres, manter como está (capitalizado)
+    if len(estado_str) > 2:
+        return estado_title
+    
+    return None
 
 def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
     try:
@@ -683,6 +769,20 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                    (df[municipio_col] != 'Null') &
                    (df[municipio_col] != 'Na') &
                    (df[municipio_col].str.len() > 2)]  # Excluir nomes muito curtos
+            
+            # Limpeza dos dados de estado/UF
+            colunas_estado = ['estado', 'Estado', 'ESTADO', 'uf', 'UF', 'sigla_uf', 'unidade_federacao']
+            coluna_estado_encontrada = None
+            for col_estado in colunas_estado:
+                if col_estado in df.columns:
+                    coluna_estado_encontrada = col_estado
+                    break
+            
+            if coluna_estado_encontrada:
+                # Aplicar limpeza de estado
+                df[coluna_estado_encontrada] = df[coluna_estado_encontrada].apply(clean_state_data)
+                # Remover registros com estados inválidos
+                df = df[df[coluna_estado_encontrada].notna()]
             
             # Processar ano
             df[ano_col] = pd.to_numeric(df[ano_col], errors='coerce')
@@ -2423,7 +2523,12 @@ with tabs[0]:
             if not sigef_filtered_for_sjoin.empty:
                  gdf_cnuc_proj_sjoin = gdf_cnuc_map.to_crs(sigef_filtered_for_sjoin.crs)
                  gdf_filtrado_map = gpd.sjoin(gdf_cnuc_proj_sjoin, sigef_filtered_for_sjoin, how="inner", predicate="intersects")
-                 ids_selecionados_map = gdf_filtrado_map["id"].unique().tolist()
+                 if "id" in gdf_filtrado_map.columns:
+                     ids_selecionados_map = gdf_filtrado_map["id"].unique().tolist()
+                 elif "nome_uc" in gdf_filtrado_map.columns:
+                     ids_selecionados_map = gdf_filtrado_map["nome_uc"].unique().tolist()
+                 else:
+                     ids_selecionados_map = gdf_filtrado_map.index.unique().tolist()
             else:
                  ids_selecionados_map = [] 
 
@@ -2472,7 +2577,7 @@ with tabs[0]:
 
     with row1_chart1:
         st.subheader("Áreas por UC")
-        st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha_raw), use_container_width=True, height=350)
+        st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha_raw), use_container_width=True, config={'displayModeBar': True})
         st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
@@ -2488,7 +2593,7 @@ with tabs[0]:
             """)
 
         st.subheader("Contagens por UC")
-        st.plotly_chart(fig_contagens_uc(gdf_cnuc_raw), use_container_width=True, height=350)
+        st.plotly_chart(fig_contagens_uc(gdf_cnuc_raw), use_container_width=True, config={'displayModeBar': True})
         st.caption("Figura 1.4: Contagem de sobreposições por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.4"):
             st.write("""
@@ -2654,6 +2759,54 @@ with tabs[1]:
     df_summary = cpt_processed_data['municipios_summary']
     temporal_data = cpt_processed_data['temporal_data']
     
+    estados_disponiveis_cpt = []
+    for tabela_key, df_tabela in cpt_data.items():
+        if not df_tabela.empty:
+            colunas_estado = ['estado', 'Estado', 'ESTADO', 'uf', 'UF', 'sigla_uf', 'unidade_federacao']
+            for col in colunas_estado:
+                if col in df_tabela.columns:
+                    estados_limpos = df_tabela[col].dropna().apply(clean_state_data).dropna().unique().tolist()
+                    estados_disponiveis_cpt.extend(estados_limpos)
+                    break
+    
+    
+    estados_disponiveis_cpt = [estado for estado in set(estados_disponiveis_cpt) if estado and isinstance(estado, str)]
+    estados_disponiveis_cpt = ['Todos'] + sorted(estados_disponiveis_cpt)
+    
+    if len(estados_disponiveis_cpt) > 1:
+        st.markdown("### Filtros")
+        estado_selecionado_cpt = st.selectbox('Filtrar por Estado:', estados_disponiveis_cpt, key="filtro_estado_cpt")
+        
+        # Aplicar filtro se não for "Todos"
+        if estado_selecionado_cpt != "Todos":
+            # Filtrar cada tabela pelos estados
+            cpt_data_filtrado = {}
+            for tabela_key, df_tabela in cpt_data.items():
+                if not df_tabela.empty:
+                    colunas_estado = ['estado', 'Estado', 'ESTADO', 'uf', 'UF', 'sigla_uf', 'unidade_federacao']
+                    coluna_estado_encontrada = None
+                    for col in colunas_estado:
+                        if col in df_tabela.columns:
+                            coluna_estado_encontrada = col
+                            break
+                    
+                    if coluna_estado_encontrada:
+                        cpt_data_filtrado[tabela_key] = df_tabela[df_tabela[coluna_estado_encontrada] == estado_selecionado_cpt]
+                    else:
+                        cpt_data_filtrado[tabela_key] = df_tabela
+                else:
+                    cpt_data_filtrado[tabela_key] = df_tabela
+            
+            # Reprocessar dados com filtro
+            cpt_processed_data = process_cpt_data_for_municipalities_clean(cpt_data_filtrado)
+            df_summary = cpt_processed_data['municipios_summary']
+            temporal_data = cpt_processed_data['temporal_data']
+            cpt_data_final = cpt_data_filtrado
+        else:
+            cpt_data_final = cpt_data
+    else:
+        cpt_data_final = cpt_data
+    
     st.markdown("### Resumo Geral")
     
     col1, col2, col3, col4 = st.columns(4)
@@ -2764,7 +2917,7 @@ with tabs[1]:
     
     with st.spinner("Carregando dados temporais..."):
         try:
-            if any(len(df) > 0 for df in cpt_data.values()):
+            if any(len(df) > 0 for df in cpt_data_final.values()):
                 df_temporal = pd.DataFrame()
             
                 colunas_ano = {
@@ -2783,8 +2936,8 @@ with tabs[1]:
                 }
                 
                 for tabela_key, nome_tipo in tabelas_info.items():
-                    if tabela_key in cpt_data and len(cpt_data[tabela_key]) > 0:
-                        df_tabela = cpt_data[tabela_key].copy()
+                    if tabela_key in cpt_data_final and len(cpt_data_final[tabela_key]) > 0:
+                        df_tabela = cpt_data_final[tabela_key].copy()
                         
                         # Encontrar coluna de ano
                         ano_col = None
@@ -3610,7 +3763,7 @@ with tabs[3]:
                 st.plotly_chart(figs['top_risco'], use_container_width=True)
             with col2:
                 st.subheader("Mapa de Distribuição dos Focos de Calor")
-                st.plotly_chart(figs['mapa'], use_container_width=True, height=500, config={'scrollZoom': True})
+                st.plotly_chart(figs['mapa'], use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
             
             st.divider()
             col3, col4 = st.columns(2, gap="large")
@@ -3621,7 +3774,7 @@ with tabs[3]:
                 st.subheader("Focos de Calor por Unidade de Conservação")
                 fig_focos_uc = fig_focos_calor_por_uc(df_graf, gdf_cnuc_raw)
                 if fig_focos_uc and fig_focos_uc.data:
-                    st.plotly_chart(fig_focos_uc, use_container_width=True, height=500)
+                    st.plotly_chart(fig_focos_uc, use_container_width=True, config={'displayModeBar': True})
                     st.caption("Figura: Top 10 Unidades de Conservação com maior quantidade de focos de calor.")
                 else:
                     st.info("Não foram encontrados focos de calor dentro das Unidades de Conservação para o período selecionado.")
@@ -3958,4 +4111,3 @@ with tabs[4]:
         st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
-
