@@ -1090,10 +1090,8 @@ def fig_focos_calor_por_uc(df_focos: pd.DataFrame, gdf_cnuc: gpd.GeoDataFrame) -
         if focos_por_uc.empty:
             return go.Figure()
         
-        # Ordenar de forma crescente para barras horizontais
         focos_por_uc = focos_por_uc.sort_values('quantidade_focos', ascending=True)
         
-        # Criar gráfico
         focos_text = [format_number_with_dots(val, 0) for val in focos_por_uc['quantidade_focos']]
         
         fig = go.Figure()
@@ -2527,10 +2525,10 @@ with tabs[0]:
 
         st.subheader("Mapa de Unidades")
         fig_map = criar_figura(gdf_cnuc_map, gdf_sigef_map, df_csv_raw, centro, ids_selecionados_map, invadindo_opcao)
+        fig_map.update_layout(height=300)
         st.plotly_chart(
             fig_map,
             width='stretch',
-            height=300,
             config={"scrollZoom": True}
         )
         st.caption("Figura 1.1: Distribuição espacial das unidades de conservação.")
@@ -3011,7 +3009,6 @@ with tabs[1]:
                         hovermode='x unified'
                     )
                     
-                    # Adicionar linha de texto nos pontos
                     fig_temporal.update_traces(
                         mode='lines+markers',
                         line=dict(width=3),
@@ -3022,8 +3019,7 @@ with tabs[1]:
                     st.plotly_chart(fig_temporal, width='stretch')
                     st.caption("Figura 2.1: Evolução temporal dos dados registrados pela CPT.")
                     
-                    # Tabela resumo
-                    with st.expander("📊 Resumo dos Dados Temporais"):
+                    with st.expander("Resumo dos Dados Temporais"):
                         resumo_temporal = df_temporal_filtrado.groupby('tipo').agg({
                             'quantidade': ['sum', 'mean', 'min', 'max'],
                             'ano': ['min', 'max', 'count']
@@ -3313,7 +3309,8 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'mun' in figs_j and figs_j['mun'] is not None:
-            st.plotly_chart(figs_j['mun'].update_layout(height=400), width='stretch', key="jud_mun")
+            figs_j['mun'].update_layout(height=400)
+            st.plotly_chart(figs_j['mun'], width='stretch', config={"displayModeBar": True}, key="jud_mun")
         else:
             st.warning("Gráfico de municípios não pôde ser gerado.")
         
@@ -3335,10 +3332,10 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'class' in figs_j and figs_j['class'] is not None:
-            st.plotly_chart(figs_j['class'].update_layout(height=400), width='stretch', key="jud_class")
+            figs_j['class'].update_layout(height=400)
+            st.plotly_chart(figs_j['class'], width='stretch', config={"displayModeBar": True}, key="jud_class")
         else:
             st.warning("Gráfico de classes não pôde ser gerado.")
-        
         st.caption("Figura 4.2: Top 10 classes processuais.")
         with st.expander("ℹ️ Detalhes e Fonte da Figura 4.2", expanded=False):
             st.write("""
@@ -3359,10 +3356,10 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'ass' in figs_j and figs_j['ass'] is not None:
-            st.plotly_chart(figs_j['ass'].update_layout(height=400), width='stretch', key="jud_ass")
+            figs_j['ass'].update_layout(height=400)
+            st.plotly_chart(figs_j['ass'], width='stretch', config={"displayModeBar": True}, key="jud_ass")
         else:
             st.warning("Gráfico de assuntos não pôde ser gerado.")
-        
         st.caption("Figura 4.3: Top 10 assuntos.")
         with st.expander("ℹ️ Detalhes e Fonte da Figura 4.3", expanded=False):
             st.write("""
@@ -3379,12 +3376,11 @@ with tabs[2]:
         <p style="margin:0;font-size:.95em;color:#666;">Top 10 órgãos com mais processos.</p>
         </div>
         """, unsafe_allow_html=True)
-        
         if 'org' in figs_j and figs_j['org'] is not None:
-            st.plotly_chart(figs_j['org'].update_layout(height=400), width='stretch', key="jud_org")
+            figs_j['org'].update_layout(height=400)
+            st.plotly_chart(figs_j['org'], width='stretch', config={"displayModeBar": True}, key="jud_org")
         else:
             st.warning("Gráfico de órgãos julgadores não pôde ser gerado.")
-        
         st.caption("Figura 4.4: Top 10 órgãos julgadores.")
         with st.expander("ℹ️ Detalhes e Fonte da Figura 4.4", expanded=False):
             st.write("""
@@ -3402,10 +3398,10 @@ with tabs[2]:
     """, unsafe_allow_html=True)
     
     if 'temp' in figs_j and figs_j['temp'] is not None:
-        st.plotly_chart(figs_j['temp'], width='stretch', key="jud_temp")
+        figs_j['temp'].update_layout(height=400)
+        st.plotly_chart(figs_j['temp'], width='stretch', config={"displayModeBar": True}, key="jud_temp")
     else:
         st.warning("Gráfico de evolução temporal não pôde ser gerado.")
-    
     st.caption("Figura 4.5: Evolução temporal dos processos judiciais.")
     with st.expander("ℹ️ Detalhes e Fonte da Figura 4.5", expanded=False):
         st.write("""
@@ -3965,11 +3961,10 @@ with tabs[4]:
                 )
                 
                 fig_desmat_uc = _apply_layout(fig_desmat_uc, title="Área de Alertas (Desmatamento) por UC", title_size=16)
-                
+                fig_desmat_uc.update_layout(height=400)
                 st.subheader("Área de Alertas por UC")
-                st.plotly_chart(fig_desmat_uc, width='stretch', height=400, key="desmat_uc_chart")
+                st.plotly_chart(fig_desmat_uc, width='stretch', config={'displayModeBar': True}, key="desmat_uc_chart")
                 st.caption("Figura 6.1: Área total de alertas de desmatamento por unidade de conservação.")
-                
                 with st.expander("Detalhes e Fonte da Figura 6.1"):
                     st.write("""
                     **Interpretação:**
@@ -3994,11 +3989,11 @@ with tabs[4]:
             if bounds_info:
                 fig_desmat_map_pts = fig_desmatamento_mapa_pontos(gdf_alertas_filtrado)
                 if fig_desmat_map_pts and fig_desmat_map_pts.data:
+                    fig_desmat_map_pts.update_layout(height=850)
                     st.subheader("Mapa de Alertas")
                     st.plotly_chart(
                         fig_desmat_map_pts,
                         width='stretch',
-                        height=850,
                         config={'scrollZoom': True},
                         key="desmat_mapa_pontos_chart"
                     )
@@ -4070,7 +4065,8 @@ with tabs[4]:
             fig_desmat_temp = fig_desmatamento_temporal(dados_temporais)
             if fig_desmat_temp and fig_desmat_temp.data:
                 st.subheader("Evolução Temporal de Alertas")
-                st.plotly_chart(fig_desmat_temp, width='stretch', height=400, key="desmat_temporal_chart")
+                fig_desmat_temp.update_layout(height=400)
+                st.plotly_chart(fig_desmat_temp, width='stretch', config={'displayModeBar': True}, key="desmat_temporal_chart")
                 st.caption("Figura 6.4: Evolução mensal da área total de alertas de desmatamento.")
                 with st.expander("Detalhes e Fonte da Figura 6.4"):
                     st.write("""
