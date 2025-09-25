@@ -2299,7 +2299,6 @@ gdf_sigef_cols = ['invadindo', 'municipio', 'geometry']
 df_proc_cols = ['municipio', 'data_ajuizamento', 'classe', 'assuntos', 'orgao_julgador']
 
 def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
-    """Mostra tabela unificada dos dados"""
     try:
         municipios = []
         alertas_area = []
@@ -2309,18 +2308,15 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
                 if pd.notna(municipio):
                     municipios.append(municipio)
                     
-                    # Área de alertas
                     area_alerta = gdf_alertas[gdf_alertas['MUNICIPIO'] == municipio]['AREAHA'].sum() if 'AREAHA' in gdf_alertas.columns else 0
                     alertas_area.append(area_alerta)
                     
-                    # Área CNUC
                     area_cnuc = 0
                     if not gdf_cnuc.empty and 'municipio' in gdf_cnuc.columns:
                         cnuc_mun = gdf_cnuc[gdf_cnuc['municipio'].str.contains(municipio, na=False)]
                         area_cnuc = cnuc_mun['ha_total'].sum() if 'ha_total' in cnuc_mun.columns else 0
                     cnuc_area.append(area_cnuc)
         
-        # Criar DataFrame
         if municipios:
             df_tabela = pd.DataFrame({
                 'Município': municipios,
@@ -2328,11 +2324,10 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
                 'CNUC (ha)': cnuc_area
             })
             
-            # Formatar números
             df_tabela['Alertas (ha)'] = df_tabela['Alertas (ha)'].apply(lambda x: f"{x:,.1f}".replace(',', '.'))
             df_tabela['CNUC (ha)'] = df_tabela['CNUC (ha)'].apply(lambda x: f"{x:,.1f}".replace(',', '.'))
             
-            st.dataframe(df_tabela, use_container_width=True, hide_index=True)
+            st.dataframe(df_tabela, width='stretch', hide_index=True)
         else:
             st.info("Nenhum dado disponível para tabela unificada")
             
@@ -2446,13 +2441,11 @@ with tabs[0]:
         area_total_ucs = 0
         area_alertas_ucs = 0
         area_cars_ucs = 0
-    
-    # Calcular dados para municípios (filtrados por estado)
     municipios_para = ['Altamira', 'São Félix do Xingu', 'Itaituba', 'Jacareacanga', 'Novo Progresso', 'Trairão']
     if estado_selecionado == 'PA' or estado_selecionado == 'Pará':
-        total_municipios = 6  # Municípios conhecidos do Pará
+        total_municipios = 6  
     elif estado_selecionado == 'Todos':
-        total_municipios = 6  # Total conhecido (6 do Pará)
+        total_municipios = 6  
     else:
         total_municipios = len(gdf_alertas_filtrado_cards['MUNICIPIO'].unique()) if not gdf_alertas_filtrado_cards.empty and 'MUNICIPIO' in gdf_alertas_filtrado_cards.columns else 0
     alertas_municipios = len(gdf_alertas_filtrado_cards) if not gdf_alertas_filtrado_cards.empty else 0
@@ -2536,7 +2529,7 @@ with tabs[0]:
         fig_map = criar_figura(gdf_cnuc_map, gdf_sigef_map, df_csv_raw, centro, ids_selecionados_map, invadindo_opcao)
         st.plotly_chart(
             fig_map,
-            use_container_width=True,
+            width='stretch',
             height=300,
             config={"scrollZoom": True}
         )
@@ -2560,7 +2553,7 @@ with tabs[0]:
         modo_input = st.radio("Mostrar valores como:", ["Hectares (ha)", "% da UC"], horizontal=True)
         modo = "absoluto" if modo_input == "Hectares (ha)" else "percent"
         fig = fig_car_por_uc_donut(gdf_cnuc_ha_raw, nome_uc, modo)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         st.caption("Figura 1.2: Comparação entre área do CAR e área restante da UC.")
         with st.expander("Detalhes e Fonte da Figura 1.2"):
             st.write("""
@@ -2577,7 +2570,7 @@ with tabs[0]:
 
     with row1_chart1:
         st.subheader("Áreas por UC")
-        st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha_raw), use_container_width=True, config={'displayModeBar': True})
+        st.plotly_chart(fig_sobreposicoes(gdf_cnuc_ha_raw), width='stretch', config={'displayModeBar': True})
         st.caption("Figura 1.3: Distribuição de áreas por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.3"):
             st.write("""
@@ -2593,7 +2586,7 @@ with tabs[0]:
             """)
 
         st.subheader("Contagens por UC")
-        st.plotly_chart(fig_contagens_uc(gdf_cnuc_raw), use_container_width=True, config={'displayModeBar': True})
+        st.plotly_chart(fig_contagens_uc(gdf_cnuc_raw), width='stretch', config={'displayModeBar': True})
         st.caption("Figura 1.4: Contagem de sobreposições por unidade de conservação.")
         with st.expander("Detalhes e Fonte da Figura 1.4"):
             st.write("""
@@ -2639,7 +2632,7 @@ with tabs[0]:
         st.markdown("**Dados brutos de alertas de desmatamento:**")
         if not gdf_alertas_raw.empty:
             df_alertas_display = gdf_alertas_raw.drop(columns=['geometry']) if 'geometry' in gdf_alertas_raw.columns else gdf_alertas_raw
-            st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_alertas_display, width='stretch', hide_index=True)
         else:
             st.info("Nenhum dado de alertas disponível.")
     
@@ -2647,7 +2640,7 @@ with tabs[0]:
         st.markdown("**Dados brutos das Unidades de Conservação:**")
         if not gdf_cnuc_raw.empty:
             df_cnuc_display = gdf_cnuc_raw.drop(columns=['geometry']) if 'geometry' in gdf_cnuc_raw.columns else gdf_cnuc_raw
-            st.dataframe(df_cnuc_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_cnuc_display, width='stretch', hide_index=True)
         else:
             st.info("Nenhum dado de UCs disponível.")
     
@@ -2655,7 +2648,7 @@ with tabs[0]:
         st.markdown("**Dados brutos do SIGEF:**")
         if not gdf_sigef_raw.empty:
             df_sigef_display = gdf_sigef_raw.drop(columns=['geometry']) if 'geometry' in gdf_sigef_raw.columns else gdf_sigef_raw
-            st.dataframe(df_sigef_display, use_container_width=True, hide_index=True)
+            st.dataframe(df_sigef_display, width='stretch', hide_index=True)
         else:
             st.info("Nenhum dado do SIGEF disponível.")
 
@@ -2777,9 +2770,7 @@ with tabs[1]:
         st.markdown("### Filtros")
         estado_selecionado_cpt = st.selectbox('Filtrar por Estado:', estados_disponiveis_cpt, key="filtro_estado_cpt")
         
-        # Aplicar filtro se não for "Todos"
         if estado_selecionado_cpt != "Todos":
-            # Filtrar cada tabela pelos estados
             cpt_data_filtrado = {}
             for tabela_key, df_tabela in cpt_data.items():
                 if not df_tabela.empty:
@@ -2796,8 +2787,6 @@ with tabs[1]:
                         cpt_data_filtrado[tabela_key] = df_tabela
                 else:
                     cpt_data_filtrado[tabela_key] = df_tabela
-            
-            # Reprocessar dados com filtro
             cpt_processed_data = process_cpt_data_for_municipalities_clean(cpt_data_filtrado)
             df_summary = cpt_processed_data['municipios_summary']
             temporal_data = cpt_processed_data['temporal_data']
@@ -2851,7 +2840,7 @@ with tabs[1]:
                     yaxis={'categoryorder': 'total ascending'},
                     margin=dict(l=80, r=50, t=50, b=40)
                 )
-                st.plotly_chart(fig_ranking, use_container_width=True)
+                st.plotly_chart(fig_ranking, width='stretch')
             else:
                 st.info("Dados insuficientes para ranking")
         else:
@@ -2907,7 +2896,7 @@ with tabs[1]:
                     showlegend=False
                 )
                 
-                st.plotly_chart(fig_familias_top, use_container_width=True)
+                st.plotly_chart(fig_familias_top, width='stretch')
             else:
                 st.info("Sem dados válidos de famílias afetadas após limpeza")
         else:
@@ -3030,7 +3019,7 @@ with tabs[1]:
                         hovertemplate='<b>%{fullData.name}</b><br>Ano: %{x}<br>Casos: %{y}<extra></extra>'
                     )
                     
-                    st.plotly_chart(fig_temporal, use_container_width=True)
+                    st.plotly_chart(fig_temporal, width='stretch')
                     st.caption("Figura 2.1: Evolução temporal dos dados registrados pela CPT.")
                     
                     # Tabela resumo
@@ -3040,7 +3029,7 @@ with tabs[1]:
                             'ano': ['min', 'max', 'count']
                         }).round(1)
                         resumo_temporal.columns = ['Total Casos', 'Média Anual', 'Min Casos', 'Max Casos', 'Ano Inicial', 'Ano Final', 'Anos com Dados']
-                        st.dataframe(resumo_temporal, use_container_width=True)
+                        st.dataframe(resumo_temporal, width='stretch')
                 else:
                     st.info("Nenhum dado encontrado com os filtros selecionados")
             else:
@@ -3076,7 +3065,7 @@ with tabs[1]:
                     names=labels_filtradas,
                     title="Distribuição por Tipo de Dados CPT"
                 )
-                st.plotly_chart(fig_pizza, use_container_width=True)
+                st.plotly_chart(fig_pizza, width='stretch')
                 st.caption("Figura 2.2: Distribuição percentual dos tipos de dados da CPT.")
             else:
                 st.info("Sem dados de dados CPT por tipo")
@@ -3099,7 +3088,7 @@ with tabs[1]:
                         yaxis={'categoryorder': 'total ascending'},
                         height=400
                     )
-                    st.plotly_chart(fig_top_mun, use_container_width=True)
+                    st.plotly_chart(fig_top_mun, width='stretch')
                     st.caption("Figura 2.3: Ranking dos municípios com mais ocorrências.")
                 else:
                     st.info("Dados insuficientes para ranking")
@@ -3166,7 +3155,7 @@ with tabs[1]:
                     showlegend=False
                 )
                 
-                st.plotly_chart(fig_assassinatos, use_container_width=True)
+                st.plotly_chart(fig_assassinatos, width='stretch')
             else:
                 st.info("SEM DADOS")
         else:
@@ -3187,7 +3176,6 @@ with tabs[1]:
             ].copy()
             
             if not df_trabalho.empty:
-                # Limpar nomes de municípios
                 df_trabalho['Município'] = df_trabalho['Município'].astype(str).str.strip().str.title()
                 
                 top_trabalho = df_trabalho.nlargest(10, 'Trabalho_Escravo').sort_values('Trabalho_Escravo', ascending=True)
@@ -3222,9 +3210,9 @@ with tabs[1]:
                     showlegend=False
                 )
                 
-                st.plotly_chart(fig_trabalho, use_container_width=True)
+                st.plotly_chart(fig_trabalho, width='stretch')
             else:
-                st.info("Nenhum caso válido de trabalho escravo encontrado após limpeza dos dados")
+                st.info("Nenhum caso válido")
         else:
             st.warning("Coluna 'Trabalho_Escravo' não encontrada nos dados processados")
     
@@ -3272,7 +3260,7 @@ with tabs[1]:
                 
                 st.dataframe(
                     df_amostra,
-                    use_container_width=True,
+                    width='stretch',
                     hide_index=True
                 )
                 
@@ -3325,7 +3313,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'mun' in figs_j and figs_j['mun'] is not None:
-            st.plotly_chart(figs_j['mun'].update_layout(height=400), use_container_width=True, key="jud_mun")
+            st.plotly_chart(figs_j['mun'].update_layout(height=400), width='stretch', key="jud_mun")
         else:
             st.warning("Gráfico de municípios não pôde ser gerado.")
         
@@ -3347,7 +3335,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'class' in figs_j and figs_j['class'] is not None:
-            st.plotly_chart(figs_j['class'].update_layout(height=400), use_container_width=True, key="jud_class")
+            st.plotly_chart(figs_j['class'].update_layout(height=400), width='stretch', key="jud_class")
         else:
             st.warning("Gráfico de classes não pôde ser gerado.")
         
@@ -3371,7 +3359,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'ass' in figs_j and figs_j['ass'] is not None:
-            st.plotly_chart(figs_j['ass'].update_layout(height=400), use_container_width=True, key="jud_ass")
+            st.plotly_chart(figs_j['ass'].update_layout(height=400), width='stretch', key="jud_ass")
         else:
             st.warning("Gráfico de assuntos não pôde ser gerado.")
         
@@ -3393,7 +3381,7 @@ with tabs[2]:
         """, unsafe_allow_html=True)
         
         if 'org' in figs_j and figs_j['org'] is not None:
-            st.plotly_chart(figs_j['org'].update_layout(height=400), use_container_width=True, key="jud_org")
+            st.plotly_chart(figs_j['org'].update_layout(height=400), width='stretch', key="jud_org")
         else:
             st.warning("Gráfico de órgãos julgadores não pôde ser gerado.")
         
@@ -3414,7 +3402,7 @@ with tabs[2]:
     """, unsafe_allow_html=True)
     
     if 'temp' in figs_j and figs_j['temp'] is not None:
-        st.plotly_chart(figs_j['temp'], use_container_width=True, key="jud_temp")
+        st.plotly_chart(figs_j['temp'], width='stretch', key="jud_temp")
     else:
         st.warning("Gráfico de evolução temporal não pôde ser gerado.")
     
@@ -3479,7 +3467,7 @@ with tabs[2]:
                 municipio_counts = municipio_counts.merge(datas_municipio, on='Município', how='left')
             
             municipio_counts = municipio_counts.head(20)
-            st.dataframe(municipio_counts, use_container_width=True)
+            st.dataframe(municipio_counts, width='stretch')
             st.caption("Tabela 4.1: Top 20 municípios com mais processos judiciais.")
         else:
              st.info("Dados insuficientes para gerar esta tabela.")
@@ -3500,7 +3488,7 @@ with tabs[2]:
                 orgao_counts = orgao_counts.merge(datas_orgao, on='Órgão Julgador', how='left')
             
             orgao_counts = orgao_counts.head(15)
-            st.dataframe(orgao_counts, use_container_width=True)
+            st.dataframe(orgao_counts, width='stretch')
             st.caption("Tabela 4.1: Top 15 órgãos julgadores mais atuantes.")
         else:
              st.info("Dados insuficientes para gerar esta tabela.")
@@ -3521,7 +3509,7 @@ with tabs[2]:
                 classe_counts = classe_counts.merge(datas_classe, on='Classe Processual', how='left')
             
             classe_counts = classe_counts.head(15)
-            st.dataframe(classe_counts, use_container_width=True)
+            st.dataframe(classe_counts, width='stretch')
             st.caption("Tabela 4.1: Top 15 classes processuais mais frequentes.")
         else:
              st.info("Dados insuficientes para gerar esta tabela.")
@@ -3542,7 +3530,7 @@ with tabs[2]:
                 assunto_counts = assunto_counts.merge(datas_assunto, on='Assunto', how='left')
             
             assunto_counts = assunto_counts.head(15)
-            st.dataframe(assunto_counts, use_container_width=True)
+            st.dataframe(assunto_counts, width='stretch')
             st.caption("Tabela 4.1: Top 15 assuntos mais recorrentes.")
         else:
              st.info("Dados insuficientes para gerar esta tabela.")
@@ -3569,7 +3557,7 @@ with tabs[2]:
                 
                 # Mostrar amostra limitada
                 df_amostra = df_relevante.head(500)
-                st.dataframe(df_amostra, use_container_width=True)
+                st.dataframe(df_amostra, width='stretch')
                 st.caption("Tabela 4.1: Dados gerais relevantes dos processos judiciais (limitado a 500 registros).")
                 
                 # Informações adicionais
@@ -3616,7 +3604,7 @@ with tabs[2]:
     st.markdown("### 📊 Dados Completos")
     st.markdown("**Dados brutos dos processos judiciais:**")
     if not df_proc_raw.empty:
-        st.dataframe(df_proc_raw, use_container_width=True, hide_index=True)
+        st.dataframe(df_proc_raw, width='stretch', hide_index=True)
     else:
         st.info("Nenhum dado de processos judiciais disponível.")
     
@@ -3723,7 +3711,7 @@ with tabs[3]:
                     ranking_display = focos_por_uc.copy()
                     ranking_display.index = range(1, len(ranking_display) + 1)
                     ranking_display.columns = ['Unidade de Conservação', 'Quantidade de Focos']
-                    st.dataframe(ranking_display, use_container_width=True)
+                    st.dataframe(ranking_display, width='stretch')
                 else:
                     st.info("Nenhum foco de calor detectado dentro das Unidades de Conservação.")
             else:
@@ -3754,27 +3742,27 @@ with tabs[3]:
             figs = graficos_inpe(df_graf, ano_sel_graf, gdf_cnuc_raw)
             
             st.subheader("Evolução Temporal do Risco de Fogo")
-            st.plotly_chart(figs['temporal'], use_container_width=True)
+            st.plotly_chart(figs['temporal'], width='stretch')
             st.caption(f"Figura: Evolução mensal do risco médio de fogo para {display_graf}.")
 
             col1, col2 = st.columns(2, gap="large")
             with col1:
                 st.subheader("Top Municípios por Risco Médio de Fogo")
-                st.plotly_chart(figs['top_risco'], use_container_width=True)
+                st.plotly_chart(figs['top_risco'], width='stretch')
             with col2:
                 st.subheader("Mapa de Distribuição dos Focos de Calor")
-                st.plotly_chart(figs['mapa'], use_container_width=True, config={'scrollZoom': True, 'displayModeBar': True})
+                st.plotly_chart(figs['mapa'], width='stretch', config={'scrollZoom': True, 'displayModeBar': True})
             
             st.divider()
             col3, col4 = st.columns(2, gap="large")
             with col3:
                 st.subheader("Top Municípios por Precipitação Acumulada")
-                st.plotly_chart(figs['top_precip'], use_container_width=True)
+                st.plotly_chart(figs['top_precip'], width='stretch')
             with col4:
                 st.subheader("Focos de Calor por Unidade de Conservação")
                 fig_focos_uc = fig_focos_calor_por_uc(df_graf, gdf_cnuc_raw)
                 if fig_focos_uc and fig_focos_uc.data:
-                    st.plotly_chart(fig_focos_uc, use_container_width=True, config={'displayModeBar': True})
+                    st.plotly_chart(fig_focos_uc, width='stretch', config={'displayModeBar': True})
                     st.caption("Figura: Top 10 Unidades de Conservação com maior quantidade de focos de calor.")
                 else:
                     st.info("Não foram encontrados focos de calor dentro das Unidades de Conservação para o período selecionado.")
@@ -3806,11 +3794,10 @@ with tabs[3]:
         try:
             df_rank, col_ord = get_cached_ranking(rank_hash, tema_rank, periodo_rank)
         except (TypeError, ValueError):
-            # Fallback em caso de erro no unpacking
             df_rank, col_ord = pd.DataFrame(), ''
         
         if df_rank is not None and not df_rank.empty:
-            st.dataframe(df_rank, use_container_width=True, hide_index=True)
+            st.dataframe(df_rank, width='stretch')
         else:
             st.info("Sem dados válidos para este ranking.")
             
@@ -3818,7 +3805,7 @@ with tabs[3]:
         st.markdown("### 📊 Dados Completos")
         st.markdown("**Dados brutos de focos de calor:**")
         if DF_BASE is not None and not DF_BASE.empty:
-            st.dataframe(DF_BASE, use_container_width=True, hide_index=True)
+            st.dataframe(DF_BASE, width='stretch')
         else:
             st.info("Nenhum dado de focos de calor disponível.")
             
@@ -3827,7 +3814,6 @@ with tabs[3]:
 
 @st.cache_data(ttl=3600, show_spinner=False, max_entries=1)
 def processar_dados_desmatamento(_gdf_alertas, ano_selecionado):
-    """Processa e filtra dados de desmatamento com cache para melhor performance."""
     if ano_selecionado != 'Todos':
         gdf_filtrado = _gdf_alertas[_gdf_alertas['ANODETEC'] == ano_selecionado].copy()
     else:
@@ -3981,7 +3967,7 @@ with tabs[4]:
                 fig_desmat_uc = _apply_layout(fig_desmat_uc, title="Área de Alertas (Desmatamento) por UC", title_size=16)
                 
                 st.subheader("Área de Alertas por UC")
-                st.plotly_chart(fig_desmat_uc, use_container_width=True, height=400, key="desmat_uc_chart")
+                st.plotly_chart(fig_desmat_uc, width='stretch', height=400, key="desmat_uc_chart")
                 st.caption("Figura 6.1: Área total de alertas de desmatamento por unidade de conservação.")
                 
                 with st.expander("Detalhes e Fonte da Figura 6.1"):
@@ -4011,7 +3997,7 @@ with tabs[4]:
                     st.subheader("Mapa de Alertas")
                     st.plotly_chart(
                         fig_desmat_map_pts,
-                        use_container_width=True,
+                        width='stretch',
                         height=850,
                         config={'scrollZoom': True},
                         key="desmat_mapa_pontos_chart"
@@ -4048,7 +4034,7 @@ with tabs[4]:
 
             st.dataframe(
                 ranking_display.head(10),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 height=400
             )
@@ -4084,7 +4070,7 @@ with tabs[4]:
             fig_desmat_temp = fig_desmatamento_temporal(dados_temporais)
             if fig_desmat_temp and fig_desmat_temp.data:
                 st.subheader("Evolução Temporal de Alertas")
-                st.plotly_chart(fig_desmat_temp, use_container_width=True, height=400, key="desmat_temporal_chart")
+                st.plotly_chart(fig_desmat_temp, width='stretch', height=400, key="desmat_temporal_chart")
                 st.caption("Figura 6.4: Evolução mensal da área total de alertas de desmatamento.")
                 with st.expander("Detalhes e Fonte da Figura 6.4"):
                     st.write("""
@@ -4108,6 +4094,6 @@ with tabs[4]:
     st.markdown("**Dados brutos de alertas de desmatamento:**")
     if not gdf_alertas_raw.empty:
         df_alertas_display = gdf_alertas_raw.drop(columns=['geometry']) if 'geometry' in gdf_alertas_raw.columns else gdf_alertas_raw
-        st.dataframe(df_alertas_display, use_container_width=True, hide_index=True)
+        st.dataframe(df_alertas_display, width='stretch', hide_index=True)
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
