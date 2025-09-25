@@ -16,26 +16,18 @@ import gc
 from sqlalchemy import create_engine, text
 
 def safe_format_number(value, decimals=1):
-    """
-    Função segura para formatação de números nos cards
-    """
     try:
         if pd.isna(value) or value is None:
             return "0"
         
-        # Converter para float se necessário
         num_value = float(value)
-        
-        # Se for zero ou muito pequeno
         if abs(num_value) < 0.001:
             return "0"
-        
-        # Formatação brasileira
+
         if decimals == 0:
             return f"{num_value:,.0f}".replace(',', '.')
         else:
             formatted = f"{num_value:,.{decimals}f}"
-            # Trocar . e , para formato brasileiro
             if '.' in formatted:
                 parts = formatted.split('.')
                 integer_part = parts[0].replace(',', '.')
@@ -759,8 +751,6 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
             if not municipio_col or not ano_col:
                 st.warning(f"Colunas não encontradas para {tabela_key}: município={municipio_col}, ano={ano_col}")
                 continue
-        
-            # Limpeza mais rigorosa dos dados de município
             df[municipio_col] = df[municipio_col].astype(str).str.strip().str.title()
             df = df[df[municipio_col].notna() & 
                    (df[municipio_col] != 'Nan') & 
@@ -768,9 +758,8 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                    (df[municipio_col] != '') & 
                    (df[municipio_col] != 'Null') &
                    (df[municipio_col] != 'Na') &
-                   (df[municipio_col].str.len() > 2)]  # Excluir nomes muito curtos
+                   (df[municipio_col].str.len() > 2)]  
             
-            # Limpeza dos dados de estado/UF
             colunas_estado = ['estado', 'Estado', 'ESTADO', 'uf', 'UF', 'sigla_uf', 'unidade_federacao']
             coluna_estado_encontrada = None
             for col_estado in colunas_estado:
@@ -779,27 +768,19 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                     break
             
             if coluna_estado_encontrada:
-                # Aplicar limpeza de estado
                 df[coluna_estado_encontrada] = df[coluna_estado_encontrada].apply(clean_state_data)
-                # Remover registros com estados inválidos
                 df = df[df[coluna_estado_encontrada].notna()]
-            
-            # Processar ano
             df[ano_col] = pd.to_numeric(df[ano_col], errors='coerce')
             df = df[df[ano_col].notna() & (df[ano_col] > 1980) & (df[ano_col] < 2030)]
             
             if df.empty:
                 continue
             
-            # Agregação por município
             if tabela_key == 'conflitos':
-                # Para conflitos, contar número de ocorrências e somar famílias se disponível
                 municipio_summary = df.groupby(municipio_col, observed=False).agg({
                     ano_col: ['count', 'min', 'max']
                 }).reset_index()
                 municipio_summary.columns = [municipio_col, 'total_ocorrencias', 'ano_min', 'ano_max']
-                
-                # Tentar encontrar coluna de famílias
                 familias_col = find_valid_column(df, config['valor_col'])
                 if familias_col:
                     df[familias_col] = pd.to_numeric(df[familias_col], errors='coerce')
@@ -810,35 +791,30 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                     municipio_summary['familias_afetadas'] = 0
                     
             elif tabela_key in ['assassinatos', 'trabalho_escravo']:
-                # Para assassinatos e trabalho escravo, tentar somar valores numéricos
                 valor_col = find_valid_column(df, config['valor_col'])
                 if valor_col:
-                    df[valor_col] = pd.to_numeric(df[valor_col], errors='coerce').fillna(1)  # Se não tem valor, conta como 1 ocorrência
+                    df[valor_col] = pd.to_numeric(df[valor_col], errors='coerce').fillna(1) 
                     municipio_summary = df.groupby(municipio_col, observed=False).agg({
                         ano_col: ['count', 'min', 'max'],
                         valor_col: 'sum'
                     }).reset_index()
                     municipio_summary.columns = [municipio_col, 'total_ocorrencias', 'ano_min', 'ano_max', 'valor_total']
                 else:
-                    # Se não tem coluna de valor, só conta ocorrências
                     municipio_summary = df.groupby(municipio_col, observed=False).agg({
                         ano_col: ['count', 'min', 'max']
                     }).reset_index()
                     municipio_summary.columns = [municipio_col, 'total_ocorrencias', 'ano_min', 'ano_max']
             else:
-                # Para outras tabelas, contar ocorrências
                 municipio_summary = df.groupby(municipio_col, observed=False).agg({
                     ano_col: ['count', 'min', 'max']
                 }).reset_index()
                 municipio_summary.columns = [municipio_col, 'total_ocorrencias', 'ano_min', 'ano_max']
             
-            # Adicionar aos dados municipais
             for _, row in municipio_summary.iterrows():
                 municipio = row[municipio_col]
                 
-                # Validação extra para garantir que o município é válido
                 if pd.isna(municipio) or str(municipio).strip() == '' or str(municipio).strip().lower() in ['nan', 'none', 'null', 'na']:
-                    continue  # Pular registros com município inválido
+                    continue 
                 
                 municipio = str(municipio).strip().title()
                 
@@ -853,9 +829,7 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                         'Total_Familias': 0
                     }
                 
-                # Determinar o valor correto a usar
                 if tabela_key in ['assassinatos', 'trabalho_escravo'] and 'valor_total' in municipio_summary.columns:
-                    # Usar o valor total calculado (soma dos valores reais)
                     valor_usar = int(row['valor_total']) if pd.notna(row['valor_total']) else int(row['total_ocorrencias'])
                 else:
                     # Usar contagem de ocorrências
@@ -863,27 +837,20 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
                 
                 municipios_data[municipio][config['tipo']] = valor_usar
                 municipios_data[municipio]['Total_Ocorrencias'] += valor_usar
-                
-                # Adicionar famílias se disponível (para conflitos)
                 if tabela_key == 'conflitos':
                     familias_col = find_valid_column(df, config['valor_col'])
                     if familias_col and familias_col in municipio_summary.columns:
                         familias = row[familias_col] if pd.notna(row[familias_col]) else 0
                         municipios_data[municipio]['Total_Familias'] += int(familias)
             
-            # Dados temporais
             temporal_summary = df.groupby(ano_col, observed=False).size().reset_index()
             temporal_summary.columns = ['ano', 'quantidade']
             temporal_summary['tipo'] = config['tipo'].replace('_', ' ')
             temporal_data.append(temporal_summary)
         
-        # Consolidar dados temporais
         df_temporal = pd.concat(temporal_data, ignore_index=True) if temporal_data else pd.DataFrame()
-        
-        # Criar DataFrame de resumo por municípios
         df_municipios = pd.DataFrame(list(municipios_data.values()))
-        
-        # Ordenar por total de ocorrências
+    
         if not df_municipios.empty:
             df_municipios = df_municipios.sort_values('Total_Ocorrencias', ascending=False)
         
@@ -907,18 +874,15 @@ def process_cpt_data_for_municipalities_clean(cpt_data: dict) -> dict:
 
 def find_valid_column(df: pd.DataFrame, possible_columns: list) -> str:
     """Encontra uma coluna válida, incluindo busca case-insensitive e parcial."""
-    # Primeiro, busca exata
+
     for col in possible_columns:
         if col in df.columns:
             return col
-    
-    # Busca case-insensitive
     df_cols_lower = {col.lower(): col for col in df.columns}
     for col in possible_columns:
         if col.lower() in df_cols_lower:
             return df_cols_lower[col.lower()]
-    
-    # Busca parcial (contém)
+
     for col in possible_columns:
         for df_col in df.columns:
             if col.lower() in df_col.lower() or df_col.lower() in col.lower():
@@ -2325,7 +2289,7 @@ def mostrar_tabela_unificada(gdf_alertas, gdf_sigef, gdf_cnuc):
             df_tabela['Alertas (ha)'] = df_tabela['Alertas (ha)'].apply(lambda x: f"{x:,.1f}".replace(',', '.'))
             df_tabela['CNUC (ha)'] = df_tabela['CNUC (ha)'].apply(lambda x: f"{x:,.1f}".replace(',', '.'))
             
-            st.dataframe(df_tabela, width='stretch', hide_index=True)
+            st.dataframe(df_tabela.reset_index(drop=True), width='stretch')
         else:
             st.info("Nenhum dado disponível para tabela unificada")
             
@@ -2450,7 +2414,6 @@ with tabs[0]:
     area_alertas_municipios = gdf_alertas_filtrado_cards['AREAHA'].sum() if not gdf_alertas_filtrado_cards.empty and 'AREAHA' in gdf_alertas_filtrado_cards.columns else 0
     cars_municipios = len(gdf_sigef_raw) if not gdf_sigef_raw.empty else 0
     
-    # Garantir que os valores sejam números válidos
     try:
         area_alertas_municipios = float(area_alertas_municipios) if pd.notna(area_alertas_municipios) else 0
     except (ValueError, TypeError):
@@ -2630,7 +2593,7 @@ with tabs[0]:
         st.markdown("**Dados brutos de alertas de desmatamento:**")
         if not gdf_alertas_raw.empty:
             df_alertas_display = gdf_alertas_raw.drop(columns=['geometry']) if 'geometry' in gdf_alertas_raw.columns else gdf_alertas_raw
-            st.dataframe(df_alertas_display, width='stretch', hide_index=True)
+            st.dataframe(df_alertas_display.reset_index(drop=True), width='stretch')
         else:
             st.info("Nenhum dado de alertas disponível.")
     
@@ -2638,7 +2601,7 @@ with tabs[0]:
         st.markdown("**Dados brutos das Unidades de Conservação:**")
         if not gdf_cnuc_raw.empty:
             df_cnuc_display = gdf_cnuc_raw.drop(columns=['geometry']) if 'geometry' in gdf_cnuc_raw.columns else gdf_cnuc_raw
-            st.dataframe(df_cnuc_display, width='stretch', hide_index=True)
+            st.dataframe(df_cnuc_display.reset_index(drop=True), width='stretch')
         else:
             st.info("Nenhum dado de UCs disponível.")
     
@@ -2646,7 +2609,7 @@ with tabs[0]:
         st.markdown("**Dados brutos do SIGEF:**")
         if not gdf_sigef_raw.empty:
             df_sigef_display = gdf_sigef_raw.drop(columns=['geometry']) if 'geometry' in gdf_sigef_raw.columns else gdf_sigef_raw
-            st.dataframe(df_sigef_display, width='stretch', hide_index=True)
+            st.dataframe(df_sigef_display.reset_index(drop=True), width='stretch')
         else:
             st.info("Nenhum dado do SIGEF disponível.")
 
@@ -3255,9 +3218,8 @@ with tabs[1]:
                 df_amostra = df_tabela_filtrada.head(100) if len(df_tabela_filtrada) > 100 else df_tabela_filtrada
                 
                 st.dataframe(
-                    df_amostra,
-                    width='stretch',
-                    hide_index=True
+                    df_amostra.reset_index(drop=True),
+                    width='stretch'
                 )
                 
                 if len(df_tabela_filtrada) > 100:
@@ -3493,7 +3455,6 @@ with tabs[2]:
         if 'classe' in df_filtrado.columns and len(df_filtrado) > 0:
             df_filtrado['classe'] = df_filtrado['classe'].apply(clean_text)
             
-            # Criar contagem simples primeiro
             classe_counts = df_filtrado['classe'].value_counts().reset_index()
             classe_counts.columns = ['Classe Processual', 'Total de Processos']
             
@@ -3546,17 +3507,14 @@ with tabs[2]:
                     if col in df_relevante.columns:
                         df_relevante[col] = df_relevante[col].apply(clean_text)
                 
-                # Ordenar por data se disponível
                 if 'data_ajuizamento' in df_relevante.columns:
                     df_relevante['data_ajuizamento'] = pd.to_datetime(df_relevante['data_ajuizamento'], errors='coerce')
                     df_relevante = df_relevante.sort_values('data_ajuizamento', ascending=False)
                 
-                # Mostrar amostra limitada
                 df_amostra = df_relevante.head(500)
                 st.dataframe(df_amostra, width='stretch')
                 st.caption("Tabela 4.1: Dados gerais relevantes dos processos judiciais (limitado a 500 registros).")
                 
-                # Informações adicionais
                 st.info(f"Mostrando {len(df_amostra)} de {len(df_filtrado)} processos totais.")
             else:
                 st.warning("Nenhuma coluna relevante encontrada nos dados.")
@@ -3600,7 +3558,7 @@ with tabs[2]:
     st.markdown("### 📊 Dados Completos")
     st.markdown("**Dados brutos dos processos judiciais:**")
     if not df_proc_raw.empty:
-        st.dataframe(df_proc_raw, width='stretch', hide_index=True)
+        st.dataframe(df_proc_raw.reset_index(drop=True), width='stretch')
     else:
         st.info("Nenhum dado de processos judiciais disponível.")
     
@@ -4028,10 +3986,8 @@ with tabs[4]:
             ranking_display['Área Média (ha)'] = ranking_display['Área Média (ha)'].apply(lambda x: f"{x:.2f}".replace('.', ','))
 
             st.dataframe(
-                ranking_display.head(10),
-                width='stretch',
-                hide_index=True,
-                height=400
+                ranking_display.head(10).reset_index(drop=True),
+                width='stretch'
             )
             st.caption("Tabela 6.1: Ranking dos municípios com maior área de alertas de desmatamento (Top 10).")
             with st.expander("Detalhes da Tabela 6.1 e Informações das Colunas"):
@@ -4090,6 +4046,6 @@ with tabs[4]:
     st.markdown("**Dados brutos de alertas de desmatamento:**")
     if not gdf_alertas_raw.empty:
         df_alertas_display = gdf_alertas_raw.drop(columns=['geometry']) if 'geometry' in gdf_alertas_raw.columns else gdf_alertas_raw
-        st.dataframe(df_alertas_display, width='stretch', hide_index=True)
+        st.dataframe(df_alertas_display.reset_index(drop=True), width='stretch')
     else:
         st.info("Nenhum dado de alertas de desmatamento disponível.")
